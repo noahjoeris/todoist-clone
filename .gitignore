@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.expo/
+web-build/
+*.tsbuildinfo
+
+# Environment (only *.example files are tracked)
+.env
+.env.*
+!.env.example
+
+# Generated PowerSync web worker assets (see apps/client)
+apps/client/public/@powersync/
+
+# Local infrastructure state
+infra/supabase/volumes/db/data/
+infra/supabase/volumes/storage/
+infra/supabase/.env
+infra/supabase/docker-compose.override.yml
+infra/supabase/.supabase-version
+
+# Native build artifacts (Expo prebuild output is not tracked yet)
+apps/client/ios/
+apps/client/android/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*

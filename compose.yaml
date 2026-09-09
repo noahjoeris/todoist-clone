@@ -1,0 +1,26 @@
+# Fastify API only. Pair with Supabase Cloud + PowerSync Cloud (default development setup),
+# or layer compose.local.yaml on top for the fully self-hosted stack:
+#   docker compose -f compose.yaml -f compose.local.yaml up -d --wait   (pnpm infra:up)
+# Variables come from the repo-root .env (see .env.example).
+
+name: todoist-clone
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: todoist-clone-api
+    restart: unless-stopped
+    ports:
+      - '${API_PORT:-3000}:3000'
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      # API_* variables let the container reach services by their compose hostnames
+      # while host processes keep using localhost URLs.
+      DATABASE_URL: ${API_DATABASE_URL:-${DATABASE_URL:?DATABASE_URL is required}}
+      SUPABASE_URL: ${API_SUPABASE_URL:-${SUPABASE_URL:?SUPABASE_URL is required}}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:?SUPABASE_SECRET_KEY is required}

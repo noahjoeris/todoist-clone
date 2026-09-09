@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm >= 10 blocks lifecycle scripts unless the package is allow-listed here.
+allowBuilds:
+  esbuild: true
+
+# Expo SDK 54+ supports pnpm's default isolated node_modules layout.
+# If a React Native library breaks under isolation, switch to `nodeLinker: hoisted`.

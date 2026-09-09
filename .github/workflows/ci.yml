@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, lint, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test:unit
+
+  client-bundles:
+    name: Expo web + iOS bundles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @todoist-clone/contracts build
+      - run: pnpm --filter @todoist-clone/client export:web
+      - run: pnpm --filter @todoist-clone/client exec expo export --platform ios
+
+  containers:
+    name: API image + compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          load: true
+          tags: todoist-clone-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test API image
+        run: |
+          docker run -d --name api -p 3000:3000 \
+            -e DATABASE_URL=postgresql://u:p@db:5432/postgres \
+            -e SUPABASE_URL=https://example.supabase.co \
+            -e SUPABASE_SECRET_KEY=ci \
+            todoist-clone-api:ci
+          for i in $(seq 1 20); do
+            curl -fsS http://localhost:3000/health && exit 0
+            sleep 1
+          done
+          docker logs api
+          exit 1
+      - name: Validate compose files
+        run: |
+          cp .env.example .env
+          cp infra/supabase/.env.example infra/supabase/.env
+          docker compose -f compose.yaml config --quiet
+          docker compose -f compose.yaml -f compose.local.yaml config --quiet

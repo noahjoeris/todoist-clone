@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://unpkg.com/@powersync/service-schema@latest/json-schema/powersync-config.json
+#
+# PowerSync Service configuration for the LOCAL self-hosted stack (compose.local.yaml).
+# PowerSync Cloud instances are configured through the dashboard; keep them in sync with this
+# file and with sync-config.yaml, which is the single source of truth for Sync Streams.
+#
+# `!env PS_*` values are substituted from the container environment.
+
+telemetry:
+  disable_telemetry_sharing: true
+
+# Source database: the Supabase Postgres, reached over the compose network.
+replication:
+  connections:
+    - type: postgresql
+      uri: !env PS_DATA_SOURCE_URI
+      sslmode: disable # private compose network only; use verify-full against anything public
+
+# Sync bucket storage: a dedicated Postgres, separate from the application database.
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_URI
+  sslmode: disable
+
+port: !env PS_PORT
+
+sync_config:
+  path: sync-config.yaml
+
+# Supabase Auth JWTs are verified against the self-hosted Supabase JWKS endpoint.
+# `kong` is a network alias of the Supabase API gateway container.
+client_auth:
+  jwks_uri: !env PS_SUPABASE_JWKS_URI
+  audience:
+    - authenticated
+
+system:
+  logging:
+    level: info
+    format: text

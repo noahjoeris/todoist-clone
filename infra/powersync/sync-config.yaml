@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://unpkg.com/@powersync/service-sync-rules@latest/schema/sync_rules.json
+#
+# Sync Streams: which rows each client downloads. This is the single source of truth for
+# both the local PowerSync Service and the PowerSync Cloud instance (paste/deploy on change).
+#
+# Rules of thumb (docs/architecture.md):
+# - Streams mirror Supabase RLS: filter on the owner column with auth.user_id().
+# - Every table referenced here must be in the `powersync` publication
+#   (see bootstrap-source-db.sql) and in the client schema (apps/client/src/data/powersync/schema.ts).
+# - The local service does not watch this file; restart `powersync` after edits.
+
+config:
+  edition: 3
+
+# No application tables yet. Example for the first feature:
+#
+# streams:
+#   user_tasks:
+#     auto_subscribe: true
+#     query: SELECT * FROM tasks WHERE user_id = auth.user_id()
+streams: {}

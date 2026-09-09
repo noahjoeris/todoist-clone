@@ -1,0 +1,1 @@
+Drizzle migrations are generated into this directory by `pnpm db:generate` and applied by `pnpm db:migrate`.

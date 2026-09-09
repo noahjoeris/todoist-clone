@@ -1,0 +1,32 @@
+{
+  "name": "todoist-clone",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev:api": "pnpm --filter @todoist-clone/api dev",
+    "dev:client": "pnpm --filter @todoist-clone/client start",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "test": "pnpm -r test",
+    "test:unit": "pnpm -r test:unit",
+    "test:integration": "pnpm -r test:integration",
+    "db:generate": "pnpm --filter @todoist-clone/database generate",
+    "db:migrate": "pnpm --filter @todoist-clone/database migrate",
+    "infra:up": "docker compose -f compose.yaml -f compose.local.yaml up -d --wait",
+    "infra:down": "docker compose -f compose.yaml -f compose.local.yaml down",
+    "infra:logs": "docker compose -f compose.yaml -f compose.local.yaml logs -f",
+    "infra:config": "docker compose -f compose.yaml -f compose.local.yaml config --quiet",
+    "infra:powersync:bootstrap": "sh infra/powersync/bootstrap-source-db.sh"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.12",
+    "typescript": "~6.0.3"
+  }
+}

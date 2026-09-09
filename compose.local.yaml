@@ -1,0 +1,73 @@
+# Fully self-hosted local stack: official Supabase compose + PowerSync Service + API.
+# Always used together with compose.yaml:
+#   docker compose -f compose.yaml -f compose.local.yaml up -d --wait   (pnpm infra:up)
+#
+# Prerequisites:
+#   1. infra/supabase/.env exists (see infra/supabase/README.project.md)
+#   2. repo-root .env has POWERSYNC_REPLICATION_PASSWORD and POWERSYNC_STORAGE_PASSWORD
+#   3. after first start: pnpm infra:powersync:bootstrap (creates the replication role + publication)
+
+include:
+  - path: infra/supabase/docker-compose.yml
+    project_directory: infra/supabase
+    env_file: infra/supabase/.env
+
+services:
+  # Dedicated Postgres for PowerSync's internal sync buckets. Kept apart from the
+  # application database so replication load and storage growth stay isolated.
+  powersync-storage:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: powersync_storage
+      POSTGRES_USER: powersync_storage
+      POSTGRES_PASSWORD: ${POWERSYNC_STORAGE_PASSWORD:?POWERSYNC_STORAGE_PASSWORD is required}
+    volumes:
+      - powersync-storage-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U powersync_storage -d powersync_storage']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  powersync:
+    image: journeyapps/powersync-service:1.26.0
+    restart: unless-stopped
+    # Runs the API server and replication worker in one container; split with `-r api` / `-r sync` later.
+    command: ['start', '-r', 'unified']
+    depends_on:
+      db:
+        condition: service_healthy
+      powersync-storage:
+        condition: service_healthy
+    volumes:
+      - ./infra/powersync:/config:ro
+    environment:
+      POWERSYNC_CONFIG_PATH: /config/service.yaml
+      PS_PORT: 8080
+      PS_DATA_SOURCE_URI: postgresql://powersync_role:${POWERSYNC_REPLICATION_PASSWORD:?POWERSYNC_REPLICATION_PASSWORD is required}@db:5432/postgres
+      PS_STORAGE_URI: postgresql://powersync_storage:${POWERSYNC_STORAGE_PASSWORD}@powersync-storage:5432/powersync_storage
+      # `kong` is a network alias of the Supabase API gateway (Envoy by default).
+      PS_SUPABASE_JWKS_URI: http://kong:8000/auth/v1/.well-known/jwks.json
+      NODE_OPTIONS: --max-old-space-size=1000
+    ports:
+      - '${POWERSYNC_PORT:-8080}:8080'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:8080/probes/liveness').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 2s
+      retries: 15
+
+  api:
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  powersync-storage-data:
