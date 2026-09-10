@@ -36,6 +36,7 @@ jobs:
               - '.npmrc'
               - '.nvmrc'
               - 'tsconfig.base.json'
+              - 'tsconfig.node.json'
               - '.github/workflows/ci.yml'
             api_image:
               - 'apps/api/**'
