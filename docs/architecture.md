@@ -152,12 +152,14 @@ Supabase Cloud only allows editing the email template with custom SMTP.) Consequ
 - **Startup.** The root screen renders nothing until the stored session is resolved, so guest
   tasks never flash before an account view. A failed restoration (typically offline with an
   expired token) offers retry or an explicit "continue as guest"; after that choice, late
-  restoration results are ignored until the user acts. Nothing is deleted on auth failure.
+  restoration results and stored-session refreshes are ignored until a session is successfully
+  applied. A failed sign-in or a confirmation-required sign-up does not lift that guard.
+  Nothing is deleted on auth failure.
 - **Guest tasks while signed in.** The signed-in view unmounts the guest list and composer and
   shows an account placeholder. `local_tasks` rows are neither copied, uploaded, cleared nor
   re-owned; they reappear after sign-out. Adoption into an account-owned synced table stays
   deferred exactly as ADR-011 describes. Sign-out uses `scope: 'local'` so other devices keep
-  their sessions.
+  their sessions, and local state becomes signed-out even if the revoke request fails.
 - **Server side unchanged.** No Fastify routes, contracts, migrations or Sync Streams are added.
   Password recovery, social login and the PowerSync connector come later.
 

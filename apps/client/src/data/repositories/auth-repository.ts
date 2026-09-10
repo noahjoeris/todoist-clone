@@ -63,6 +63,7 @@ export function createAuthRepository(
   }
 
   function applySession(session: Session | null) {
+    if (session) guestOverride = false;
     setState(
       session ? { status: 'signed-in', user: toAuthUser(session) } : { status: 'signed-out' },
     );
@@ -122,7 +123,6 @@ export function createAuthRepository(
     },
 
     async signUp(input) {
-      clearGuestOverride();
       try {
         const { email, password } = credentialsSchema.parse(input);
         const { data, error } = await auth.signUp({ email, password });
@@ -141,7 +141,6 @@ export function createAuthRepository(
     },
 
     async signIn(input) {
-      clearGuestOverride();
       try {
         const { email, password } = credentialsSchema.parse(input);
         const { data, error } = await auth.signInWithPassword({ email, password });
@@ -158,9 +157,13 @@ export function createAuthRepository(
     },
 
     async signOut() {
+      // supabase-js still hits the server for `scope: 'local'` and skips `_removeSession()`
+      // on retryable fetch errors. Apply signed-out locally either way so guest tasks stay
+      // reachable offline; ignore leftover session events until the next successful sign-in.
       const { error } = await auth.signOut({ scope: 'local' });
-      if (error) throw toAuthFailure(error);
+      guestOverride = true;
       applySession(null);
+      if (error) throw toAuthFailure(error);
     },
 
     dispose() {

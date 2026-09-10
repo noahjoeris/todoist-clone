@@ -190,6 +190,46 @@ describe('auth repository', () => {
 
       expect(repository.getState().status).toBe('signed-in');
     });
+
+    it('keeps ignoring a stored session after a failed sign-in from guest', async () => {
+      auth.getSession.mockResolvedValue({
+        data: { session: null },
+        error: new AuthRetryableFetchError('fetch failed', 0),
+      });
+      const repository = createRepository();
+      await repository.restoreSession();
+      repository.continueAsGuest();
+
+      auth.signInWithPassword.mockResolvedValue({
+        data: { session: null, user: null },
+        error: new AuthApiError('Invalid login credentials', 400, 'invalid_credentials'),
+      });
+      await expect(repository.signIn(credentials)).rejects.toMatchObject({
+        code: 'invalid-credentials',
+      });
+
+      emitAuthEvent('TOKEN_REFRESHED', session());
+      expect(repository.getState()).toEqual({ status: 'signed-out' });
+    });
+
+    it('keeps ignoring a stored session when sign-up needs confirmation', async () => {
+      auth.getSession.mockResolvedValue({
+        data: { session: null },
+        error: new AuthRetryableFetchError('fetch failed', 0),
+      });
+      const repository = createRepository();
+      await repository.restoreSession();
+      repository.continueAsGuest();
+
+      auth.signUp.mockResolvedValue({
+        data: { user: { id: 'user-1', identities: [{ id: 'i' }] }, session: null },
+        error: null,
+      });
+      await expect(repository.signUp(credentials)).resolves.toBe('confirmation-required');
+
+      emitAuthEvent('TOKEN_REFRESHED', session());
+      expect(repository.getState()).toEqual({ status: 'signed-out' });
+    });
   });
 
   describe('sign up', () => {
@@ -302,12 +342,15 @@ describe('auth repository', () => {
       expect(repository.getState()).toEqual({ status: 'signed-out' });
     });
 
-    it('stays signed in when sign-out fails', async () => {
+    it('returns to guest mode even when the revoke request fails', async () => {
       const repository = await createSignedInRepository();
       auth.signOut.mockResolvedValue({ error: new AuthRetryableFetchError('offline', 0) });
 
       await expect(repository.signOut()).rejects.toMatchObject({ code: 'network' });
-      expect(repository.getState().status).toBe('signed-in');
+      expect(repository.getState()).toEqual({ status: 'signed-out' });
+
+      emitAuthEvent('TOKEN_REFRESHED', session());
+      expect(repository.getState()).toEqual({ status: 'signed-out' });
     });
   });
 
