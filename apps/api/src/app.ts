@@ -1,12 +1,19 @@
 import cors from '@fastify/cors';
+import type { DatabaseConnection } from '@todoist-clone/database';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
+import type { JWTVerifyGetKey } from 'jose';
 import { type Env, parseCorsOrigin } from './config/env.js';
+import { authPlugin, supabaseJwksUrl } from './plugins/auth.js';
+import { databasePlugin } from './plugins/database.js';
 import { healthRoutes } from './routes/health.js';
+import { meRoutes } from './routes/me.js';
 
 export interface BuildAppOptions {
   env: Env;
   version: string;
   logger?: FastifyServerOptions['logger'];
+  database?: DatabaseConnection;
+  getKey?: JWTVerifyGetKey;
 }
 
 /**
@@ -22,7 +29,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   await app.register(cors, { origin: parseCorsOrigin(options.env.CORS_ORIGIN) });
 
+  const databaseOptions = options.database
+    ? { url: options.env.DATABASE_URL, connection: options.database }
+    : { url: options.env.DATABASE_URL };
+  await app.register(databasePlugin, databaseOptions);
+
+  const authOptions = options.getKey
+    ? { jwksUrl: supabaseJwksUrl(options.env.SUPABASE_URL), getKey: options.getKey }
+    : { jwksUrl: supabaseJwksUrl(options.env.SUPABASE_URL) };
+  await app.register(authPlugin, authOptions);
+
   await app.register(healthRoutes, { version: options.version });
+  await app.register(meRoutes);
 
   return app;
 }

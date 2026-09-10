@@ -18,6 +18,8 @@
     "@todoist-clone/contracts": "workspace:*",
     "@todoist-clone/database": "workspace:*",
     "fastify": "^5.12.3",
+    "fastify-plugin": "^6.0.0",
+    "jose": "^6.2.12",
     "zod": "^4.5.4"
   },
   "devDependencies": {

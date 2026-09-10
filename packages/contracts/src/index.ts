@@ -6,3 +6,4 @@
  * - No database models, no runtime dependencies on server or client code.
  */
 export { type HealthResponse, healthResponseSchema } from './health.js';
+export { type MeResponse, meResponseSchema } from './me.js';

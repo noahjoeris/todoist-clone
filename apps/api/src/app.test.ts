@@ -28,4 +28,12 @@ describe('app', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: 'ok', version: '1.2.3' });
   });
+
+  it('rejects GET /me without a token', async () => {
+    const response = await app.inject({ method: 'GET', url: '/me' });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.headers['www-authenticate']).toBe('Bearer');
+    expect(response.json()).toEqual({ error: 'unauthorized' });
+  });
 });
