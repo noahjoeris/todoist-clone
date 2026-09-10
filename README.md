@@ -79,6 +79,19 @@ Accounts are email + password with confirmation through the link in Supabase's d
 Sessions persist in AsyncStorage on native and `localStorage` on web. Sign-out only ends the
 current device's session.
 
+The Fastify API verifies those access tokens against the project's JWKS
+(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`), ES256 only. Cloud projects need
+asymmetric JWT signing keys (the default for new projects; legacy HS256 projects migrate
+under **Authentication → JWT Signing Keys**). The local stack needs `JWT_KEYS` in
+`infra/supabase/.env` (produced by `utils/add-new-auth-keys.sh`; do not edit vendored
+compose files). Smoke test:
+
+```sh
+curl -H "Authorization: Bearer <access_token>" http://localhost:3000/me
+```
+
+On web the access token is in `localStorage` under `sb-<project-ref>-auth-token`.
+
 ## Commands
 
 | Command | What |

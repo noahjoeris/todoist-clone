@@ -58,7 +58,8 @@ emails via pg-boss) shares the same code. Consequences:
 
 - The API connects with a fixed database role, so **Supabase RLS does not apply the user's
   identity automatically**. The API must authorize every write explicitly (verify the Supabase
-  JWT, check ownership). Integration tests target exactly this.
+  JWT, check ownership). Integration tests target exactly this. How those JWTs are verified
+  is ADR-013.
 - RLS stays enabled on application tables as defence in depth for any PostgREST access.
 
 ### ADR-003 Download access is defined by Sync Streams, not RLS
@@ -160,8 +161,26 @@ Supabase Cloud only allows editing the email template with custom SMTP.) Consequ
   re-owned; they reappear after sign-out. Adoption into an account-owned synced table stays
   deferred exactly as ADR-011 describes. Sign-out uses `scope: 'local'` so other devices keep
   their sessions, and local state becomes signed-out even if the revoke request fails.
-- **Server side unchanged.** No Fastify routes, contracts, migrations or Sync Streams are added.
-  Password recovery, social login and the PowerSync connector come later.
+- **Server side.** This ADR covers the client boundary only. The API verifies the same
+  Supabase access tokens (ADR-013). Password recovery, social login and the PowerSync
+  connector come later.
+
+### ADR-013 The API verifies Supabase JWTs via JWKS (asymmetric only)
+
+User access tokens are ES256. The API verifies them with `jose` against
+`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`. `createRemoteJWKSet` caches the set and
+refetches on an unknown kid (30s cooldown). Consequences:
+
+- Audience is `authenticated`. The `sub` claim becomes `request.user.id`.
+- Only ES256 is accepted; there is no HS256 fallback. `SUPABASE_SECRET_KEY` is not used
+  for verification.
+- Issuer is not checked: inside compose the API reaches Supabase at `http://kong:8000`
+  while tokens carry the external URL (`http://localhost:8000` or the cloud project URL).
+- Routes opt in with `{ onRequest: app.authenticate }`. Failures are `401` with
+  `{ error: "unauthorized" }` and `WWW-Authenticate: Bearer`; reasons stay at debug and
+  the token is never echoed.
+- Self-hosted stacks must set `JWT_KEYS` (an EC key) in `infra/supabase/.env` so JWKS is
+  non-empty (`utils/add-new-auth-keys.sh`). The vendored compose files are not edited.
 
 ## Deferred
 
