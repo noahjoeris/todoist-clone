@@ -6,7 +6,6 @@
  * Business rules (validation, derived state) live here or in pure helpers next to the
  * repository so they can be unit-tested without a database.
  *
- * Add repositories as features arrive, e.g.:
- *   export { createTaskRepository, type TaskRepository } from './task-repository';
  */
-export {};
+export { type Task, type TaskInput, type TaskPriority, taskInputSchema } from './task';
+export { createTaskRepository, type TaskRepository } from './task-repository';

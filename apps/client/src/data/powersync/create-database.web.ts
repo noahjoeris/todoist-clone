@@ -1,5 +1,5 @@
 import { PowerSyncDatabase } from '@powersync/web';
-import { type CreatePowerSyncDatabase, POWERSYNC_DB_FILENAME } from './create-database';
+import { type CreatePowerSyncDatabase, POWERSYNC_DB_FILENAME } from './database-options';
 import { appSchema } from './schema';
 
 // Web workers are copied into `public/@powersync` by `pnpm powersync:copy-assets`

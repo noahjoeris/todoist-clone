@@ -24,6 +24,11 @@ compose.local.yaml  Full self-hosted stack (Supabase + PowerSync + API)
 
 ## Setup
 
+The client currently supports local task creation (title, description, priority, date and
+optional time) and a live task list. Tasks persist on the same device/browser; login and cloud
+sync are not implemented yet. Client-only use needs no `.env`: run `pnpm install`, `pnpm build`,
+then `pnpm --filter @todoist-clone/client web` (or a native development build).
+
 ```sh
 pnpm install
 cp .env.example .env                          # API, drizzle-kit, docker compose

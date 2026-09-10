@@ -1,6 +1,4 @@
-import type { CommonPowerSyncDatabase } from '@powersync/common';
-
-export const POWERSYNC_DB_FILENAME = 'todoist-clone.sqlite';
+import type { CreatePowerSyncDatabase } from './database-options';
 
 /**
  * Platform-agnostic signature for opening the local PowerSync database.
@@ -9,8 +7,6 @@ export const POWERSYNC_DB_FILENAME = 'todoist-clone.sqlite';
  * `create-database.web.ts` on web. This file exists so TypeScript has a single declaration
  * to type-check against; it must never be bundled.
  */
-export type CreatePowerSyncDatabase = () => CommonPowerSyncDatabase;
-
 export const createPowerSyncDatabase: CreatePowerSyncDatabase = () => {
   throw new Error(
     'createPowerSyncDatabase was resolved without a platform suffix; expected .native.ts or .web.ts',
