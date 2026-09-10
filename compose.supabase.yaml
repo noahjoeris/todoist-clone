@@ -1,0 +1,8 @@
+# Vendored official Supabase compose. `include` keeps relative volumes under
+# infra/supabase/. Do not overlay services in this file — Compose rejects
+# that (`services.auth conflicts with imported resource`). Overrides go in
+# compose.local.yaml, which is passed as a later `-f`.
+include:
+  - path: infra/supabase/docker-compose.yml
+    project_directory: infra/supabase
+    env_file: infra/supabase/.env

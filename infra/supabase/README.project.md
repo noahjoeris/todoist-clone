@@ -7,16 +7,17 @@ Unmodified copy of the official Supabase Docker distribution.
 - Docs: https://supabase.com/docs/guides/self-hosting/docker
 
 Do not edit the upstream files in this directory. Project-specific additions live in the
-repo-root `compose.local.yaml` (which `include`s `docker-compose.yml` from here) and in
-`infra/powersync/`.
+repo-root `compose.supabase.yaml` (`include` of this stack) and `compose.local.yaml`
+(service overlays + PowerSync), and in `infra/powersync/`.
 
 ## First-time setup
 
 ```sh
 cd infra/supabase
 cp .env.example .env
-sh utils/generate-keys.sh        # random secrets
-sh utils/add-new-auth-keys.sh    # publishable/secret API keys + asymmetric JWT keys
+sh utils/generate-keys.sh              # random secrets
+sh utils/add-new-auth-keys.sh --update-env  # publishable/secret API keys + JWT_KEYS
+git checkout -- docker-compose.yml     # script uncomments GOTRUE_JWT_KEYS; we overlay it instead
 ```
 
 Then start everything from the repo root with `pnpm infra:up`.

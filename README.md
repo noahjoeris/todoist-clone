@@ -12,8 +12,9 @@ packages/contracts  Zod schemas/types shared by API and client
 packages/database   Drizzle schema, migrations, connection factory (server-only)
 infra/supabase      Vendored official Supabase self-hosting stack (unmodified)
 infra/powersync     PowerSync Service config + Sync Streams + source-db bootstrap
-compose.yaml        API container
-compose.local.yaml  Full self-hosted stack (Supabase + PowerSync + API)
+compose.yaml            API container
+compose.supabase.yaml   Include of vendored Supabase compose
+compose.local.yaml      Local overlays (ES256 JWT on auth, PowerSync) + API
 ```
 
 ## Prerequisites
@@ -53,7 +54,8 @@ Fill both env files. Two ways to provide the backing services:
 ### B. Fully self-hosted (Docker)
 
 ```sh
-cd infra/supabase && cp .env.example .env && sh utils/generate-keys.sh && sh utils/add-new-auth-keys.sh && cd ../..
+cd infra/supabase && cp .env.example .env && sh utils/generate-keys.sh && sh utils/add-new-auth-keys.sh --update-env && cd ../..
+git checkout -- infra/supabase/docker-compose.yml   # overlay sets GOTRUE_JWT_KEYS; do not keep vendored edits
 pnpm infra:up                     # Supabase + PowerSync + API, waits for health checks
 pnpm infra:powersync:bootstrap    # replication role + publication in the Supabase DB
 ```
@@ -78,6 +80,20 @@ Accounts are email + password with confirmation through the link in Supabase's d
 
 Sessions persist in AsyncStorage on native and `localStorage` on web. Sign-out only ends the
 current device's session.
+
+The Fastify API verifies those access tokens against the project's JWKS
+(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`), ES256 only. Cloud projects need
+asymmetric JWT signing keys (the default for new projects; legacy HS256 projects migrate
+under **Authentication → JWT Signing Keys**). The local stack needs `JWT_KEYS` in
+`infra/supabase/.env` (from `utils/add-new-auth-keys.sh --update-env`; restore any
+vendored `docker-compose.yml` edit — `compose.local.yaml` overlays `GOTRUE_JWT_KEYS` on
+Auth). Smoke test:
+
+```sh
+curl -H "Authorization: Bearer <access_token>" http://localhost:3000/me
+```
+
+On web the access token is in `localStorage` under `sb-<project-ref>-auth-token`.
 
 ## Commands
 

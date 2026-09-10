@@ -1,6 +1,8 @@
 # Fastify API only. Pair with Supabase Cloud + PowerSync Cloud (default development setup),
 # or layer compose.local.yaml on top for the fully self-hosted stack:
-#   docker compose -f compose.yaml -f compose.local.yaml up -d --wait   (pnpm infra:up)
+#   docker compose --env-file infra/supabase/.env --env-file .env \
+#     -f compose.yaml -f compose.supabase.yaml -f compose.local.yaml up -d --wait
+#   (pnpm infra:up)
 # Variables come from the repo-root .env (see .env.example).
 
 name: todoist-clone

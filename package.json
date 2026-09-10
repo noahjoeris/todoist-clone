@@ -19,10 +19,10 @@
     "test:integration": "pnpm -r test:integration",
     "db:generate": "pnpm --filter @todoist-clone/database generate",
     "db:migrate": "pnpm --filter @todoist-clone/database migrate",
-    "infra:up": "docker compose -f compose.yaml -f compose.local.yaml up -d --wait",
-    "infra:down": "docker compose -f compose.yaml -f compose.local.yaml down",
-    "infra:logs": "docker compose -f compose.yaml -f compose.local.yaml logs -f",
-    "infra:config": "docker compose -f compose.yaml -f compose.local.yaml config --quiet",
+    "infra:up": "docker compose --env-file infra/supabase/.env --env-file .env -f compose.yaml -f compose.supabase.yaml -f compose.local.yaml up -d --wait",
+    "infra:down": "docker compose --env-file infra/supabase/.env --env-file .env -f compose.yaml -f compose.supabase.yaml -f compose.local.yaml down",
+    "infra:logs": "docker compose --env-file infra/supabase/.env --env-file .env -f compose.yaml -f compose.supabase.yaml -f compose.local.yaml logs -f",
+    "infra:config": "docker compose --env-file infra/supabase/.env --env-file .env -f compose.yaml -f compose.supabase.yaml -f compose.local.yaml config --quiet",
     "infra:powersync:bootstrap": "sh infra/powersync/bootstrap-source-db.sh"
   },
   "devDependencies": {
