@@ -8,7 +8,48 @@ or AI status check is configured.
 
 1. Develop the feature on its own branch and run the repository's verification commands.
 2. Commit, push, and open a PR to `main`, unless the user explicitly deferred those actions.
+   Title the PR with the same conventional format as commit subjects (below).
 3. Provide the PR link and CI status. Hand back to the user to request reviews.
+
+## PR titles
+
+Same rules as commit subjects. Squash-merge uses the title as the commit on `main`.
+
+```text
+type(scope): summary
+```
+
+Use `type: summary` when there is no useful scope.
+
+Common types:
+
+- `feat`: user-visible feature or capability
+- `fix`: bug fix
+- `docs`: documentation only
+- `test`: tests only
+- `refactor`: restructuring without behavior change
+- `perf`: performance improvement
+- `style`: formatting or lint-only change
+- `build`: build system or dependency change
+- `ci`: CI configuration change
+- `chore`: maintenance that does not fit another type
+- `revert`: revert a prior commit
+
+Subject requirements:
+
+- Keep the summary imperative and specific.
+- Prefer lowercase after the colon unless a name or acronym requires casing.
+- Do not end with a period.
+- Keep it near 72 characters when practical.
+- Match the repository's existing commit style when it is clear and compatible.
+
+Never mention LLMs, AI, generated code, automated authorship, or tool usage.
+
+```text
+feat(tasks): add local task creation and list
+docs: define manual PR review workflow
+fix(client): restore platform database adapters
+```
 
 ## Address feedback
 
