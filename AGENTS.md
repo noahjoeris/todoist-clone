@@ -13,9 +13,14 @@ Instructions for AI agents and humans working in this repository.
 - Respect the boundaries in `docs/architecture.md`: UI → repositories → PowerSync; the client
   never imports `packages/database`; contracts stay dependency-free.
 - Writes are authorized in the Fastify API. Never rely on Supabase RLS to protect API writes.
+- Pre-release: unreleased, stay on version 1 until the user says otherwise. Do not bump
+  package, API, or schema versions. Breaking changes are allowed. Do not add compatibility
+  layers, dual-write paths, or data/schema migrations that preserve old shapes. Destructive
+  resets of local and cloud data are acceptable.
 - New synced tables need, together: a Drizzle migration (incl. `ALTER PUBLICATION powersync ADD TABLE`),
   a Sync Stream in `infra/powersync/sync-config.yaml`, and the client table in
-  `apps/client/src/data/powersync/schema.ts`.
+  `apps/client/src/data/powersync/schema.ts`. Schema changes replace those in place; do not
+  stack additive upgrade migrations.
 - Do not edit vendored files under `infra/supabase/` (except `README.project.md`).
 - Secrets only in untracked `.env` files; update the matching `.env.example` when adding variables.
 - Expo: this project uses SDK 57. Check https://docs.expo.dev/versions/v57.0.0/ before writing
@@ -25,6 +30,8 @@ Instructions for AI agents and humans working in this repository.
 
 - Develop each feature on its own branch; open a PR to `main` after verification.
   Explicit user instructions to defer commits, pushes or PRs take precedence.
+  PR titles use the same conventional format as commit subjects (`type(scope): summary`).
+  See `docs/pr-reviews.md`.
 - Reviews may come from any AI agent or human. The user requests reviews.
   After opening the PR, provide its link
   and hand back to the user; do not trigger reviews or wait indefinitely for them.
