@@ -2,8 +2,6 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // The integration project has no tests yet; allow `test:integration` to succeed.
-    passWithNoTests: true,
     projects: [
       {
         test: {
