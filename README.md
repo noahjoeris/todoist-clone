@@ -24,10 +24,11 @@ compose.local.yaml  Full self-hosted stack (Supabase + PowerSync + API)
 
 ## Setup
 
-The client currently supports local task creation (title, description, priority, date and
-optional time) and a live task list. Tasks persist on the same device/browser; login and cloud
-sync are not implemented yet. Client-only use needs no `.env`: run `pnpm install`, `pnpm build`,
-then `pnpm --filter @todoist-clone/client web` (or a native development build).
+The client currently supports local guest tasks (title, description, priority, date and optional
+time) with a live list, plus email/password accounts with email-link confirmation and persistent
+sessions. Guest tasks stay on the device and are hidden while signed in; account task sync is
+not implemented yet. Guest-only use needs no `.env`: run `pnpm install`, `pnpm build`, then
+`pnpm --filter @todoist-clone/client web` (or a native development build).
 
 ```sh
 pnpm install
@@ -41,6 +42,8 @@ Fill both env files. Two ways to provide the backing services:
 ### A. Cloud (default for development)
 
 1. Create a Supabase project. Copy URL, publishable key, secret key, pooler + direct DB URLs into the env files.
+   For authentication only, the client needs just `EXPO_PUBLIC_SUPABASE_URL` and
+   `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; see [Authentication setup](#authentication-setup).
 2. Prepare the database for PowerSync (replication role + empty `powersync` publication):
    `psql "<direct connection string>" -v powersync_password='...' -f infra/powersync/bootstrap-source-db.sql`
 3. Create a PowerSync Cloud instance: connect it to the Supabase DB as `powersync_role`,
@@ -57,6 +60,24 @@ pnpm infra:powersync:bootstrap    # replication role + publication in the Supaba
 
 Studio: http://localhost:8000 · API gateway: http://localhost:8000 · PowerSync: http://localhost:8080 · API: http://localhost:3000.
 Point the env files at these local URLs (see comments in `.env.example`).
+
+### Authentication setup
+
+Accounts are email + password with confirmation through the link in Supabase's default
+"Confirm signup" email, so the project needs:
+
+1. **Authentication → Sign In / Providers → Email**: enabled, with *Confirm email* on.
+2. **Authentication → URL Configuration → Site URL**: the web app's origin, e.g.
+   `http://localhost:8081` for `expo start --web`. The confirmation link redirects there with
+   the session in the URL fragment, and the web client picks it up and signs the user in.
+   On native there is no deep link yet: the link opens in the browser and the user returns to
+   the app and signs in with their password (the email is confirmed server-side either way).
+3. Supabase's built-in email service only delivers to the project's team members and allows
+   about 2 emails per hour; use a team address for development. Anything more needs custom SMTP
+   (https://supabase.com/docs/guides/auth/auth-smtp), which also unlocks template editing.
+
+Sessions persist in AsyncStorage on native and `localStorage` on web. Sign-out only ends the
+current device's session.
 
 ## Commands
 
