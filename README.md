@@ -107,6 +107,11 @@ On web the access token is in `localStorage` under `sb-<project-ref>-auth-token`
 | `pnpm infra:up` / `infra:down` / `infra:logs` / `infra:config` | Local stack |
 | `docker build -f apps/api/Dockerfile .` | API image (context = repo root) |
 
+CI (`.github/workflows/ci.yml`) always typechecks, lints and unit-tests. Expo web/iOS
+exports run when `apps/client` or `packages/contracts` change; the API image when
+`apps/api` or `packages/{contracts,database}` change; compose validation when compose
+files or `infra/` change. Pushes to `main` run every job. PRs do not export the Docker cache.
+
 ## Testing policy
 
 - Unit tests for business logic (repositories, validation, pure helpers), colocated as `*.test.ts`.
