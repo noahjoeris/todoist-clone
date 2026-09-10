@@ -75,4 +75,4 @@ jobs:
           cp .env.example .env
           cp infra/supabase/.env.example infra/supabase/.env
           docker compose -f compose.yaml config --quiet
-          docker compose --env-file infra/supabase/.env --env-file .env -f compose.yaml -f compose.local.yaml config --quiet
+          docker compose --env-file infra/supabase/.env --env-file .env -f compose.yaml -f compose.supabase.yaml -f compose.local.yaml config --quiet

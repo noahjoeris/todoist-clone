@@ -12,8 +12,9 @@ packages/contracts  Zod schemas/types shared by API and client
 packages/database   Drizzle schema, migrations, connection factory (server-only)
 infra/supabase      Vendored official Supabase self-hosting stack (unmodified)
 infra/powersync     PowerSync Service config + Sync Streams + source-db bootstrap
-compose.yaml        API container
-compose.local.yaml  Full self-hosted stack (Supabase + PowerSync + API)
+compose.yaml            API container
+compose.supabase.yaml   Include of vendored Supabase compose
+compose.local.yaml      Local overlays (ES256 JWT on auth, PowerSync) + API
 ```
 
 ## Prerequisites
@@ -85,7 +86,7 @@ The Fastify API verifies those access tokens against the project's JWKS
 asymmetric JWT signing keys (the default for new projects; legacy HS256 projects migrate
 under **Authentication → JWT Signing Keys**). The local stack needs `JWT_KEYS` in
 `infra/supabase/.env` (from `utils/add-new-auth-keys.sh --update-env`; restore any
-vendored `docker-compose.yml` edit — `compose.local.yaml` passes `GOTRUE_JWT_KEYS` into
+vendored `docker-compose.yml` edit — `compose.local.yaml` overlays `GOTRUE_JWT_KEYS` on
 Auth). Smoke test:
 
 ```sh

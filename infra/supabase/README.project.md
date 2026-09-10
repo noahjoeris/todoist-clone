@@ -7,8 +7,8 @@ Unmodified copy of the official Supabase Docker distribution.
 - Docs: https://supabase.com/docs/guides/self-hosting/docker
 
 Do not edit the upstream files in this directory. Project-specific additions live in the
-repo-root `compose.local.yaml` (which `include`s `docker-compose.yml` from here) and in
-`infra/powersync/`.
+repo-root `compose.supabase.yaml` (`include` of this stack) and `compose.local.yaml`
+(service overlays + PowerSync), and in `infra/powersync/`.
 
 ## First-time setup
 

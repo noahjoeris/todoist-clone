@@ -1,23 +1,22 @@
 # Fully self-hosted local stack: official Supabase compose + PowerSync Service + API.
-# Always used together with compose.yaml. Interpolation must see both env files
-# (`include.env_file` only applies to the vendored compose file):
+# Always used together with compose.yaml and compose.supabase.yaml.
+# Interpolation must see both env files (`include.env_file` only applies to the
+# vendored compose file):
 #   docker compose --env-file infra/supabase/.env --env-file .env \
-#     -f compose.yaml -f compose.local.yaml up -d --wait   (pnpm infra:up)
+#     -f compose.yaml -f compose.supabase.yaml -f compose.local.yaml up -d --wait
+#   (pnpm infra:up)
 #
 # Prerequisites:
 #   1. infra/supabase/.env exists (see infra/supabase/README.project.md)
 #   2. repo-root .env has POWERSYNC_REPLICATION_PASSWORD and POWERSYNC_STORAGE_PASSWORD
 #   3. after first start: pnpm infra:powersync:bootstrap (creates the replication role + publication)
 
-include:
-  - path: infra/supabase/docker-compose.yml
-    project_directory: infra/supabase
-    env_file: infra/supabase/.env
-
 services:
   # Vendored compose leaves GOTRUE_JWT_KEYS commented out (and the official
   # add-new-auth-keys.sh --update-env uncomments it by editing that file). Overlay
-  # it here so JWT_KEYS in infra/supabase/.env actually reaches GoTrue.
+  # it here so JWT_KEYS in infra/supabase/.env actually reaches GoTrue. This file
+  # is a later `-f` than compose.supabase.yaml; overlaying inside the including
+  # file is rejected (`services.auth conflicts with imported resource`).
   auth:
     environment:
       GOTRUE_JWT_KEYS: ${JWT_KEYS:-[]}

@@ -96,7 +96,8 @@ response headers; switching to OPFS would require COOP/COEP headers.
 
 ### ADR-008 Cloud services first, self-hosting kept viable
 
-Development targets Supabase Cloud and PowerSync Cloud. `compose.local.yaml` runs the identical
+Development targets Supabase Cloud and PowerSync Cloud. `compose.supabase.yaml` plus
+`compose.local.yaml` run the identical
 components self-hosted: the unmodified official Supabase stack (vendored, pinned), the official
 `journeyapps/powersync-service` image with a **dedicated Postgres for bucket storage**, and the
 API image. The same `service.yaml`/`sync-config.yaml` are the source of truth for both.
@@ -181,9 +182,10 @@ refetches on an unknown kid (30s cooldown). Consequences:
   the token is never echoed.
 - Self-hosted stacks generate `JWT_KEYS` (an EC key) in `infra/supabase/.env` with
   `utils/add-new-auth-keys.sh`. Vendored compose leaves `GOTRUE_JWT_KEYS` commented
-  out; `compose.local.yaml` sets it on `auth`. `pnpm infra:up` interpolates
-  `infra/supabase/.env` then the repo-root `.env` (`include.env_file` does not apply
-  to the overlay).
+  out; `compose.local.yaml` sets it on `auth` as a later `-f` than
+  `compose.supabase.yaml` (Compose forbids overlaying a service in the file that
+  `include`s it). `pnpm infra:up` interpolates `infra/supabase/.env` then the
+  repo-root `.env`.
 
 ## Deferred
 
