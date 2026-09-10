@@ -5,8 +5,7 @@ import { HomeScreen } from './src/ui/screens/HomeScreen';
 
 type Bootstrap = { system: DataSystem } | { error: Error };
 
-// Open the local database once at startup, like a local-first app should. Missing public
-// configuration is the most common setup mistake, so surface it instead of crashing.
+// Open the local database once. Guest tasks do not require cloud configuration.
 function bootstrap(): Bootstrap {
   try {
     return { system: createDataSystem() };
@@ -23,9 +22,9 @@ export default function App() {
       {'error' in bootstrapResult ? (
         <ConfigurationErrorScreen error={bootstrapResult.error} />
       ) : (
-        <HomeScreen />
+        <HomeScreen repository={bootstrapResult.system.tasks} />
       )}
-      <StatusBar style="auto" />
+      <StatusBar style="light" />
     </>
   );
 }

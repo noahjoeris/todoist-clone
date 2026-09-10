@@ -1,8 +1,7 @@
 import type { CommonPowerSyncDatabase } from '@powersync/common';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { loadPublicEnv, type PublicEnv } from '../config/env';
+import { randomUUID } from 'expo-crypto';
 import { createPowerSyncDatabase } from './powersync/create-database';
-import { createSupabaseClient } from './supabase/client';
+import { createTaskRepository, type TaskRepository } from './repositories';
 
 /**
  * Composition root for client-side data access. Instantiate once per app and
@@ -12,16 +11,14 @@ import { createSupabaseClient } from './supabase/client';
  * (auth token + upload queue handler) arrives together with the first synced table.
  */
 export interface DataSystem {
-  env: PublicEnv;
-  supabase: SupabaseClient;
   powersync: CommonPowerSyncDatabase;
+  tasks: TaskRepository;
 }
 
 export function createDataSystem(): DataSystem {
-  const env = loadPublicEnv();
+  const powersync = createPowerSyncDatabase();
   return {
-    env,
-    supabase: createSupabaseClient(env),
-    powersync: createPowerSyncDatabase(),
+    powersync,
+    tasks: createTaskRepository(powersync, randomUUID),
   };
 }

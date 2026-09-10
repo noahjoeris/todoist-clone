@@ -112,6 +112,22 @@ the same artifacts; `pnpm build` is required after cloning.
 Unit tests for business logic; targeted integration tests for authorization and PowerSync
 upload handling; no end-to-end suite. Basic CI runs without cloud credentials.
 
+### ADR-011 Guest tasks use a local-only PowerSync table
+
+The first task feature stores guest tasks in `local_tasks` with `localOnly: true`. They persist
+on the device without authentication, cloud configuration, or queued uploads. The repository
+owns validation, SQL and live subscriptions; the UI receives only the repository interface.
+No Postgres migration or Sync Stream is needed for this unsynced table.
+
+Scheduled dates (`YYYY-MM-DD`) and optional wall-clock times (`HH:mm`) are separate nullable
+fields, not UTC instants; time requires a date. Deadlines and reminders are separate future
+features. Priority uses 1 (highest) through 4 (default).
+
+When auth and sync arrive, explicitly adopt guest tasks into an account-owned synced table,
+preserving IDs and copying successfully before removing local originals. Do not turn this
+guest table into a synced table in place or upload ownerless rows. Cloud adapters remain
+available but are not instantiated by the local-only composition root.
+
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,
