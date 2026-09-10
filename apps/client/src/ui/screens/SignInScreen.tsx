@@ -10,15 +10,15 @@ import { colors } from '../theme';
 interface SignInScreenProps {
   auth: AuthRepository;
   onCreateAccount: () => void;
-  /** The account exists but its email is unconfirmed; continue with code entry. */
-  onVerifyEmail: (email: string) => void;
+  /** The account exists but its email is unconfirmed; show the confirmation instructions. */
+  onConfirmEmail: (email: string) => void;
   onCancel: () => void;
 }
 
 export function SignInScreen({
   auth,
   onCreateAccount,
-  onVerifyEmail,
+  onConfirmEmail,
   onCancel,
 }: SignInScreenProps) {
   // Password lives only in component state and is dropped when this screen unmounts.
@@ -59,9 +59,9 @@ export function SignInScreen({
           <FormError message={error.message} />
           {error.code === 'email-not-confirmed' && (
             <ActionButton
-              label="Enter verification code"
+              label="Resend confirmation link"
               color={colors.green}
-              onPress={() => onVerifyEmail(email.trim().toLowerCase())}
+              onPress={() => onConfirmEmail(email.trim().toLowerCase())}
             />
           )}
         </View>

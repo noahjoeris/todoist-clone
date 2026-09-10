@@ -53,7 +53,6 @@ describe('auth repository', () => {
     }),
     signUp: vi.fn(),
     signInWithPassword: vi.fn(),
-    verifyOtp: vi.fn(),
     resend: vi.fn(),
     signOut: vi.fn(),
     startAutoRefresh: vi.fn(),
@@ -194,14 +193,14 @@ describe('auth repository', () => {
   });
 
   describe('sign up', () => {
-    it('requires verification when Supabase returns no session', async () => {
+    it('requires confirmation when Supabase returns no session', async () => {
       auth.signUp.mockResolvedValue({
         data: { user: { id: 'user-1', identities: [{ id: 'i' }] }, session: null },
         error: null,
       });
       const repository = createRepository();
 
-      await expect(repository.signUp(credentials)).resolves.toBe('verification-required');
+      await expect(repository.signUp(credentials)).resolves.toBe('confirmation-required');
       expect(auth.signUp).toHaveBeenCalledWith(credentials);
     });
 
@@ -263,7 +262,7 @@ describe('auth repository', () => {
       expect(repository.getState()).toEqual({ status: 'signed-out' });
     });
 
-    it('reports an unconfirmed email so the UI can offer verification', async () => {
+    it('reports an unconfirmed email so the UI can offer to resend the link', async () => {
       auth.signInWithPassword.mockResolvedValue({
         data: { session: null, user: null },
         error: new AuthApiError('Email not confirmed', 400, 'email_not_confirmed'),
@@ -275,54 +274,18 @@ describe('auth repository', () => {
     });
   });
 
-  describe('email verification', () => {
-    it('verifies the code as an email OTP and signs in', async () => {
-      auth.verifyOtp.mockResolvedValue({
-        data: { session: session(), user: session().user },
-        error: null,
-      });
-      const repository = createRepository();
-
-      await repository.verifyEmail('ada@example.com', ' 123456 ');
-
-      expect(auth.verifyOtp).toHaveBeenCalledWith({
-        email: 'ada@example.com',
-        token: '123456',
-        type: 'email',
-      });
-      expect(repository.getState().status).toBe('signed-in');
-    });
-
-    it('rejects malformed codes locally', async () => {
-      const repository = createRepository();
-      await expect(repository.verifyEmail('ada@example.com', '12ab')).rejects.toMatchObject({
-        code: 'invalid-input',
-      });
-      expect(auth.verifyOtp).not.toHaveBeenCalled();
-    });
-
-    it('maps expired or wrong codes', async () => {
-      auth.verifyOtp.mockResolvedValue({
-        data: { session: null, user: null },
-        error: new AuthApiError('Token has expired or is invalid', 403, 'otp_expired'),
-      });
-      const repository = createRepository();
-      await expect(repository.verifyEmail('ada@example.com', '123456')).rejects.toMatchObject({
-        code: 'invalid-code',
-      });
-    });
-
-    it('resends the signup code and maps rate limits', async () => {
+  describe('confirmation email', () => {
+    it('resends the signup link and maps rate limits', async () => {
       auth.resend.mockResolvedValueOnce({ data: {}, error: null });
       const repository = createRepository();
-      await repository.resendVerification('ada@example.com');
+      await repository.resendConfirmation('ada@example.com');
       expect(auth.resend).toHaveBeenCalledWith({ type: 'signup', email: 'ada@example.com' });
 
       auth.resend.mockResolvedValueOnce({
         data: {},
         error: new AuthApiError('rate limit', 429, 'over_email_send_rate_limit'),
       });
-      await expect(repository.resendVerification('ada@example.com')).rejects.toMatchObject({
+      await expect(repository.resendConfirmation('ada@example.com')).rejects.toMatchObject({
         code: 'rate-limited',
       });
     });

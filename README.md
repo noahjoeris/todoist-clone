@@ -25,7 +25,7 @@ compose.local.yaml  Full self-hosted stack (Supabase + PowerSync + API)
 ## Setup
 
 The client currently supports local guest tasks (title, description, priority, date and optional
-time) with a live list, plus email/password accounts with email-code confirmation and persistent
+time) with a live list, plus email/password accounts with email-link confirmation and persistent
 sessions. Guest tasks stay on the device and are hidden while signed in; account task sync is
 not implemented yet. Guest-only use needs no `.env`: run `pnpm install`, `pnpm build`, then
 `pnpm --filter @todoist-clone/client web` (or a native development build).
@@ -63,28 +63,18 @@ Point the env files at these local URLs (see comments in `.env.example`).
 
 ### Authentication setup
 
-Sign-up sends a 6-digit code that the user types into the app (no confirmation link), so the
-Supabase project needs:
+Accounts are email + password with confirmation through the link in Supabase's default
+"Confirm signup" email, so the project needs:
 
 1. **Authentication → Sign In / Providers → Email**: enabled, with *Confirm email* on.
-2. **Authentication → Emails → Templates → Confirm signup**: the body must contain `{{ .Token }}`
-   (the default template only links `{{ .ConfirmationURL }}`). A minimal template:
-
-   ```html
-   <h2>Confirm your signup</h2>
-   <p>Your verification code is:</p>
-   <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px">{{ .Token }}</p>
-   <p>Enter it in the Todoist Clone app to finish creating your account.</p>
-   ```
-
-3. Supabase's built-in email service only delivers to the project's team members and is rate
-   limited; use a team address for development. Broader testing needs custom SMTP
-   (https://supabase.com/docs/guides/auth/auth-smtp).
-
-Cloud is the development path for authentication. The self-hosted stack (option B) requires
-confirmation too (`ENABLE_EMAIL_AUTOCONFIRM=false`) and delivers to its bundled fake inbox, but
-its vendored compose file exposes no template override; to use it for auth development, pass
-`GOTRUE_MAILER_TEMPLATES_CONFIRMATION` to the `auth` service via `compose.local.yaml`.
+2. **Authentication → URL Configuration → Site URL**: the web app's origin, e.g.
+   `http://localhost:8081` for `expo start --web`. The confirmation link redirects there with
+   the session in the URL fragment, and the web client picks it up and signs the user in.
+   On native there is no deep link yet: the link opens in the browser and the user returns to
+   the app and signs in with their password (the email is confirmed server-side either way).
+3. Supabase's built-in email service only delivers to the project's team members and allows
+   about 2 emails per hour; use a team address for development. Anything more needs custom SMTP
+   (https://supabase.com/docs/guides/auth/auth-smtp), which also unlocks template editing.
 
 Sessions persist in AsyncStorage on native and `localStorage` on web. Sign-out only ends the
 current device's session.

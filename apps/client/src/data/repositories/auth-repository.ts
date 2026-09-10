@@ -6,10 +6,9 @@ import {
   type Credentials,
   credentialsSchema,
   toAuthFailure,
-  verificationCodeSchema,
 } from './auth';
 
-export type SignUpOutcome = 'verification-required' | 'signed-in';
+export type SignUpOutcome = 'confirmation-required' | 'signed-in';
 
 export interface AuthRepository {
   getState(): AuthState;
@@ -19,12 +18,11 @@ export interface AuthRepository {
   restoreSession(): Promise<void>;
   /** Leave `restore-failed` as a guest. Later restoration results are ignored. */
   continueAsGuest(): void;
-  /** Creates the account. `verification-required` means a code was emailed to the address. */
+  /** Creates the account. `confirmation-required` means a confirmation link was emailed. */
   signUp(credentials: Credentials): Promise<SignUpOutcome>;
   signIn(credentials: Credentials): Promise<void>;
-  /** Confirms the signup code from the email and signs the user in. */
-  verifyEmail(email: string, code: string): Promise<void>;
-  resendVerification(email: string): Promise<void>;
+  /** Emails a fresh confirmation link for an unconfirmed account. */
+  resendConfirmation(email: string): Promise<void>;
   /** Ends this device's session only; other devices stay signed in. */
   signOut(): Promise<void>;
   /** Stops refresh timers and listeners. The repository is unusable afterwards. */
@@ -38,7 +36,6 @@ export type AuthClient = Pick<
   | 'onAuthStateChange'
   | 'signUp'
   | 'signInWithPassword'
-  | 'verifyOtp'
   | 'resend'
   | 'signOut'
   | 'startAutoRefresh'
@@ -131,13 +128,13 @@ export function createAuthRepository(
         const { data, error } = await auth.signUp({ email, password });
         if (error) throw error;
         // With confirmations on, Supabase answers an existing email with an obfuscated user
-        // that has no identities instead of an error. Sending them to code entry would strand them.
+        // that has no identities instead of an error. Telling them to check their inbox would strand them.
         if (data.user?.identities?.length === 0) throw new AuthFailure('email-taken');
         if (data.session) {
           applySession(data.session);
           return 'signed-in';
         }
-        return 'verification-required';
+        return 'confirmation-required';
       } catch (error) {
         throw toAuthFailure(error);
       }
@@ -155,19 +152,7 @@ export function createAuthRepository(
       }
     },
 
-    async verifyEmail(email, code) {
-      clearGuestOverride();
-      try {
-        const token = verificationCodeSchema.parse(code);
-        const { data, error } = await auth.verifyOtp({ email, token, type: 'email' });
-        if (error) throw error;
-        applySession(data.session);
-      } catch (error) {
-        throw toAuthFailure(error);
-      }
-    },
-
-    async resendVerification(email) {
+    async resendConfirmation(email) {
       const { error } = await auth.resend({ type: 'signup', email });
       if (error) throw toAuthFailure(error);
     },

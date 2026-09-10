@@ -3,11 +3,11 @@ import type { AuthRepository, TaskRepository } from '../data/repositories';
 import type { DataSystem } from '../data/system';
 import { useAuthState } from './hooks/useAuthState';
 import { AccountScreen } from './screens/AccountScreen';
+import { ConfirmEmailScreen } from './screens/ConfirmEmailScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { SessionRestoreFailedScreen, SessionRestoringScreen } from './screens/SessionRestoreScreen';
 import { SignInScreen } from './screens/SignInScreen';
 import { SignUpScreen } from './screens/SignUpScreen';
-import { VerifyEmailScreen } from './screens/VerifyEmailScreen';
 
 /**
  * Chooses between guest and account content. Without Supabase configuration the app is
@@ -29,7 +29,7 @@ export function RootScreen({ system }: { system: DataSystem }) {
   }
 }
 
-type AuthScreen = { name: 'sign-in' } | { name: 'sign-up' } | { name: 'verify'; email: string };
+type AuthScreen = { name: 'sign-in' } | { name: 'sign-up' } | { name: 'confirm'; email: string };
 
 function AccountAwareScreen({ tasks, auth }: { tasks: TaskRepository; auth: AuthRepository }) {
   const authState = useAuthState(auth);
@@ -71,7 +71,7 @@ function AccountAwareScreen({ tasks, auth }: { tasks: TaskRepository; auth: Auth
         <SignInScreen
           auth={auth}
           onCreateAccount={() => setScreen({ name: 'sign-up' })}
-          onVerifyEmail={(email) => setScreen({ name: 'verify', email })}
+          onConfirmEmail={(email) => setScreen({ name: 'confirm', email })}
           onCancel={() => setScreen(null)}
         />
       );
@@ -79,17 +79,17 @@ function AccountAwareScreen({ tasks, auth }: { tasks: TaskRepository; auth: Auth
       return (
         <SignUpScreen
           auth={auth}
-          onVerificationRequired={(email) => setScreen({ name: 'verify', email })}
+          onConfirmationRequired={(email) => setScreen({ name: 'confirm', email })}
           onSignIn={() => setScreen({ name: 'sign-in' })}
           onCancel={() => setScreen(null)}
         />
       );
-    case 'verify':
+    case 'confirm':
       return (
-        <VerifyEmailScreen
+        <ConfirmEmailScreen
           auth={auth}
           email={screen.email}
-          onBackToSignIn={() => setScreen({ name: 'sign-in' })}
+          onSignIn={() => setScreen({ name: 'sign-in' })}
         />
       );
   }

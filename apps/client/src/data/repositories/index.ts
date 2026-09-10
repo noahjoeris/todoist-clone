@@ -16,7 +16,6 @@ export {
   type Credentials,
   credentialsSchema,
   MIN_PASSWORD_LENGTH,
-  verificationCodeSchema,
 } from './auth';
 export {
   type AuthRepository,

@@ -130,8 +130,9 @@ available but are not instantiated by the local-only composition root.
 
 ### ADR-012 Supabase Auth behind an `AuthRepository`; guest tasks hidden while signed in
 
-Email/password authentication with email-code confirmation (`verifyOtp`, type `email`) is the
-first cloud feature. Consequences:
+Email/password authentication with confirmation through the link in Supabase's default email is
+the first cloud feature. (A typed 6-digit code would give the same UX on every platform, but
+Supabase Cloud only allows editing the email template with custom SMTP.) Consequences:
 
 - **Boundary.** `src/data/repositories/auth-repository.ts` is the only place the UI reaches auth
   from. It exposes an observable `AuthState` (`restoring` / `restore-failed` / `signed-out` /
@@ -141,11 +142,13 @@ first cloud feature. Consequences:
 - **Optional configuration.** `loadSupabaseEnv()` reads only the two Supabase variables. Neither
   set means guest-only mode; a partial or malformed pair is reported inside the app while guest
   tasks keep working. PowerSync and API URLs are not read until the first synced table.
-- **Session persistence per platform (extends ADR-007).** `auth-storage.native.ts` supplies
-  AsyncStorage; `auth-storage.web.ts` leaves supabase-js on `localStorage`.
-  `auth-lifecycle.native.ts` starts/stops token auto-refresh from `AppState`; the web variant is
-  a no-op because supabase-js already reacts to `visibilitychange`. The deprecated `lock`
-  option is not used.
+- **Platform options (extends ADR-007).** `auth-platform.native.ts` supplies AsyncStorage and
+  leaves URL session detection off (no deep link yet; after confirming in the browser the user
+  signs in with their password). `auth-platform.web.ts` keeps supabase-js on `localStorage`
+  and enables `detectSessionInUrl`, so the confirmation redirect to the Site URL signs the
+  user in. `auth-lifecycle.native.ts` starts/stops token auto-refresh from `AppState`; the web
+  variant is a no-op because supabase-js already reacts to `visibilitychange`. The deprecated
+  `lock` option is not used.
 - **Startup.** The root screen renders nothing until the stored session is resolved, so guest
   tasks never flash before an account view. A failed restoration (typically offline with an
   expired token) offers retry or an explicit "continue as guest"; after that choice, late

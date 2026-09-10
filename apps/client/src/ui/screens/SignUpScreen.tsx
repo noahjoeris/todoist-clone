@@ -9,15 +9,15 @@ import { colors } from '../theme';
 
 interface SignUpScreenProps {
   auth: AuthRepository;
-  /** A confirmation code was emailed; continue with code entry. */
-  onVerificationRequired: (email: string) => void;
+  /** A confirmation link was emailed; show the confirmation instructions. */
+  onConfirmationRequired: (email: string) => void;
   onSignIn: () => void;
   onCancel: () => void;
 }
 
 export function SignUpScreen({
   auth,
-  onVerificationRequired,
+  onConfirmationRequired,
   onSignIn,
   onCancel,
 }: SignUpScreenProps) {
@@ -30,14 +30,14 @@ export function SignUpScreen({
     run(async () => {
       const outcome = await auth.signUp({ email, password });
       // `signed-in` (confirmations disabled) is handled by the auth state switching screens.
-      if (outcome === 'verification-required') onVerificationRequired(email.trim().toLowerCase());
+      if (outcome === 'confirmation-required') onConfirmationRequired(email.trim().toLowerCase());
     });
   const canSubmit = !pending && email.trim() !== '' && password.length >= MIN_PASSWORD_LENGTH;
 
   return (
     <FormScreen
       title="Create account"
-      description="We’ll email you a 6-digit code to confirm your address."
+      description="We’ll email you a link to confirm your address."
     >
       <TextField
         label="Email"

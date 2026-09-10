@@ -35,26 +35,19 @@ export const credentialsSchema = z.object({
 
 export type Credentials = z.infer<typeof credentialsSchema>;
 
-/** Six-digit code from the "Confirm signup" email (`{{ .Token }}`). */
-export const verificationCodeSchema = z
-  .string()
-  .trim()
-  .regex(/^\d{6}$/, { error: 'Enter the 6-digit code from your email.' });
-
 export type AuthFailureCode =
   | 'invalid-input'
   | 'invalid-credentials'
   | 'email-not-confirmed'
   | 'email-taken'
   | 'weak-password'
-  | 'invalid-code'
   | 'rate-limited'
   | 'network'
   | 'unknown';
 
 /**
  * Every auth operation rejects with an `AuthFailure`. `message` is safe to show to users;
- * `code` lets screens branch (e.g. offer verification after `email-not-confirmed`).
+ * `code` lets screens branch (e.g. offer to resend the link after `email-not-confirmed`).
  */
 export class AuthFailure extends Error {
   override readonly name = 'AuthFailure';
@@ -74,7 +67,6 @@ const DEFAULT_MESSAGES: Record<AuthFailureCode, string> = {
   'email-not-confirmed': 'Confirm your email address to sign in.',
   'email-taken': 'An account with this email already exists. Sign in instead.',
   'weak-password': `Use at least ${MIN_PASSWORD_LENGTH} characters.`,
-  'invalid-code': 'That code is invalid or has expired. Request a new one.',
   'rate-limited': 'Too many attempts. Wait a moment and try again.',
   network: 'Couldn’t reach the server. Check your connection and try again.',
   unknown: 'Something went wrong. Try again.',
@@ -87,7 +79,6 @@ const SUPABASE_ERROR_CODES: Record<string, AuthFailureCode> = {
   user_already_exists: 'email-taken',
   email_exists: 'email-taken',
   weak_password: 'weak-password',
-  otp_expired: 'invalid-code',
   over_request_rate_limit: 'rate-limited',
   over_email_send_rate_limit: 'rate-limited',
   validation_failed: 'invalid-input',

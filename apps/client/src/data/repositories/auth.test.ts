@@ -1,7 +1,7 @@
 import { AuthApiError, AuthRetryableFetchError } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { AuthFailure, credentialsSchema, toAuthFailure, verificationCodeSchema } from './auth';
+import { AuthFailure, credentialsSchema, toAuthFailure } from './auth';
 
 describe('credentialsSchema', () => {
   it('normalises the email and enforces the minimum password length', () => {
@@ -18,14 +18,6 @@ describe('credentialsSchema', () => {
   });
 });
 
-describe('verificationCodeSchema', () => {
-  it('accepts exactly six digits', () => {
-    expect(verificationCodeSchema.parse(' 123456 ')).toBe('123456');
-    expect(verificationCodeSchema.safeParse('12345').success).toBe(false);
-    expect(verificationCodeSchema.safeParse('12345a').success).toBe(false);
-  });
-});
-
 describe('toAuthFailure', () => {
   it('passes AuthFailure through unchanged', () => {
     const failure = new AuthFailure('email-taken');
@@ -37,7 +29,6 @@ describe('toAuthFailure', () => {
       ['invalid_credentials', 'invalid-credentials'],
       ['email_not_confirmed', 'email-not-confirmed'],
       ['user_already_exists', 'email-taken'],
-      ['otp_expired', 'invalid-code'],
       ['over_email_send_rate_limit', 'rate-limited'],
     ];
     for (const [supabaseCode, expected] of cases) {
