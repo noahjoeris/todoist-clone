@@ -15,8 +15,9 @@ repo-root `compose.local.yaml` (which `include`s `docker-compose.yml` from here)
 ```sh
 cd infra/supabase
 cp .env.example .env
-sh utils/generate-keys.sh        # random secrets
-sh utils/add-new-auth-keys.sh    # publishable/secret API keys + asymmetric JWT keys
+sh utils/generate-keys.sh              # random secrets
+sh utils/add-new-auth-keys.sh --update-env  # publishable/secret API keys + JWT_KEYS
+git checkout -- docker-compose.yml     # script uncomments GOTRUE_JWT_KEYS; we overlay it instead
 ```
 
 Then start everything from the repo root with `pnpm infra:up`.

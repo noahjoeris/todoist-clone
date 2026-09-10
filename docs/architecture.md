@@ -179,8 +179,11 @@ refetches on an unknown kid (30s cooldown). Consequences:
 - Routes opt in with `{ onRequest: app.authenticate }`. Failures are `401` with
   `{ error: "unauthorized" }` and `WWW-Authenticate: Bearer`; reasons stay at debug and
   the token is never echoed.
-- Self-hosted stacks must set `JWT_KEYS` (an EC key) in `infra/supabase/.env` so JWKS is
-  non-empty (`utils/add-new-auth-keys.sh`). The vendored compose files are not edited.
+- Self-hosted stacks generate `JWT_KEYS` (an EC key) in `infra/supabase/.env` with
+  `utils/add-new-auth-keys.sh`. Vendored compose leaves `GOTRUE_JWT_KEYS` commented
+  out; `compose.local.yaml` sets it on `auth`. `pnpm infra:up` interpolates
+  `infra/supabase/.env` then the repo-root `.env` (`include.env_file` does not apply
+  to the overlay).
 
 ## Deferred
 

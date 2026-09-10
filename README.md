@@ -53,7 +53,8 @@ Fill both env files. Two ways to provide the backing services:
 ### B. Fully self-hosted (Docker)
 
 ```sh
-cd infra/supabase && cp .env.example .env && sh utils/generate-keys.sh && sh utils/add-new-auth-keys.sh && cd ../..
+cd infra/supabase && cp .env.example .env && sh utils/generate-keys.sh && sh utils/add-new-auth-keys.sh --update-env && cd ../..
+git checkout -- infra/supabase/docker-compose.yml   # overlay sets GOTRUE_JWT_KEYS; do not keep vendored edits
 pnpm infra:up                     # Supabase + PowerSync + API, waits for health checks
 pnpm infra:powersync:bootstrap    # replication role + publication in the Supabase DB
 ```
@@ -83,8 +84,9 @@ The Fastify API verifies those access tokens against the project's JWKS
 (`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`), ES256 only. Cloud projects need
 asymmetric JWT signing keys (the default for new projects; legacy HS256 projects migrate
 under **Authentication → JWT Signing Keys**). The local stack needs `JWT_KEYS` in
-`infra/supabase/.env` (produced by `utils/add-new-auth-keys.sh`; do not edit vendored
-compose files). Smoke test:
+`infra/supabase/.env` (from `utils/add-new-auth-keys.sh --update-env`; restore any
+vendored `docker-compose.yml` edit — `compose.local.yaml` passes `GOTRUE_JWT_KEYS` into
+Auth). Smoke test:
 
 ```sh
 curl -H "Authorization: Bearer <access_token>" http://localhost:3000/me

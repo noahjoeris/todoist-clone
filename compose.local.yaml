@@ -1,6 +1,8 @@
 # Fully self-hosted local stack: official Supabase compose + PowerSync Service + API.
-# Always used together with compose.yaml:
-#   docker compose -f compose.yaml -f compose.local.yaml up -d --wait   (pnpm infra:up)
+# Always used together with compose.yaml. Interpolation must see both env files
+# (`include.env_file` only applies to the vendored compose file):
+#   docker compose --env-file infra/supabase/.env --env-file .env \
+#     -f compose.yaml -f compose.local.yaml up -d --wait   (pnpm infra:up)
 #
 # Prerequisites:
 #   1. infra/supabase/.env exists (see infra/supabase/README.project.md)
@@ -13,6 +15,13 @@ include:
     env_file: infra/supabase/.env
 
 services:
+  # Vendored compose leaves GOTRUE_JWT_KEYS commented out (and the official
+  # add-new-auth-keys.sh --update-env uncomments it by editing that file). Overlay
+  # it here so JWT_KEYS in infra/supabase/.env actually reaches GoTrue.
+  auth:
+    environment:
+      GOTRUE_JWT_KEYS: ${JWT_KEYS:-[]}
+
   # Dedicated Postgres for PowerSync's internal sync buckets. Kept apart from the
   # application database so replication load and storage growth stay isolated.
   powersync-storage:
