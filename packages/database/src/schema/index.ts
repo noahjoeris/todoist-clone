@@ -7,5 +7,4 @@
  * - Tables must be added to the `powersync` publication explicitly (see infra/powersync).
  */
 
-// No application tables yet. Export tables from here as they are added:
-// export * from './tasks.js';
+export * from './tasks.js';

@@ -12,10 +12,7 @@
 config:
   edition: 3
 
-# No application tables yet. Example for the first feature:
-#
-# streams:
-#   user_tasks:
-#     auto_subscribe: true
-#     query: SELECT * FROM tasks WHERE user_id = auth.user_id()
-streams: {}
+streams:
+  user_tasks:
+    auto_subscribe: true
+    query: SELECT * FROM tasks WHERE user_id = auth.user_id()

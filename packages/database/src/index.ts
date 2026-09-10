@@ -35,4 +35,5 @@ export function createDatabaseConnection(options: DatabaseOptions): DatabaseConn
   };
 }
 
+export { and, eq, sql } from 'drizzle-orm';
 export { schema };
