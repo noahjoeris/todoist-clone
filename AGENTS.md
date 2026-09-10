@@ -21,6 +21,27 @@ Instructions for AI agents and humans working in this repository.
 - Expo: this project uses SDK 57. Check https://docs.expo.dev/versions/v57.0.0/ before writing
   Expo/React Native code; APIs change between SDKs.
 
+## Feature PR workflow
+
+- Develop each feature on its own branch; open a PR to `main` after verification.
+  Explicit user instructions to defer commits, pushes or PRs take precedence.
+- Reviews may come from any AI agent or human. The user requests reviews.
+  After opening the PR, provide its link
+  and hand back to the user; do not trigger reviews or wait indefinitely for them.
+- When the user asks to address PR feedback, read review summaries, inline threads
+  and general PR comments before making changes.
+- Read every finding. Fix valid issues, add relevant regression tests, and reply
+  with the fix commit. Explain disagreements with evidence; do not blindly apply suggestions.
+- Resolve a review thread only after addressing it and posting a reply. Push fixes
+  to the same branch, verify CI, and summarize changes and unresolved findings.
+- The user triggers any re-review. Identify changes made since the last reviewed
+  commit; do not claim they have been reviewed until a new review confirms that.
+- Stop after two fix/re-review rounds if disagreements or recurring findings remain;
+  summarize unresolved decisions for the user. No automatic merge; the user merges.
+- Distinguish implementation complete, feedback addressed, and review complete.
+  No automated review check or reviewer API key is required by this repository.
+- See `docs/pr-reviews.md` for the manual review workflow.
+
 ## Verify before finishing
 
 ```sh
