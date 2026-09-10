@@ -14,7 +14,18 @@ import { TaskComposer } from '../components/TaskComposer';
 import { TaskRow } from '../components/TaskRow';
 import { colors } from '../theme';
 
-export function HomeScreen({ repository }: { repository: TaskRepository }) {
+/** How the guest screen offers (or explains the absence of) account sign-in. */
+export type AccountEntry =
+  | { kind: 'hidden' }
+  | { kind: 'sign-in'; onPress: () => void }
+  | { kind: 'unavailable'; message: string };
+
+interface HomeScreenProps {
+  repository: TaskRepository;
+  account: AccountEntry;
+}
+
+export function HomeScreen({ repository, account }: HomeScreenProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -62,7 +73,17 @@ export function HomeScreen({ repository }: { repository: TaskRepository }) {
                   {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}
                 </Text>
               )}
+              {account.kind === 'sign-in' && (
+                <View style={styles.account}>
+                  <ActionButton label="Sign in" onPress={account.onPress} />
+                </View>
+              )}
             </View>
+            {account.kind === 'unavailable' && (
+              <Text accessibilityRole="alert" style={styles.authUnavailable}>
+                Sign-in is unavailable. {account.message}
+              </Text>
+            )}
             {composing ? (
               <TaskComposer onCreate={repository.create} onClose={() => setComposing(false)} />
             ) : (
@@ -111,9 +132,11 @@ const styles = StyleSheet.create({
   },
   header: { gap: 24, marginBottom: 16 },
   eyebrow: { color: colors.muted, fontSize: 11, fontWeight: '600', letterSpacing: 2 },
-  heading: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
+  heading: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   title: { color: colors.text, fontSize: 28, fontWeight: '700' },
   count: { color: colors.muted, fontSize: 13 },
+  account: { marginLeft: 'auto' },
+  authUnavailable: { color: colors.error, fontSize: 13, lineHeight: 18 },
   add: { alignSelf: 'flex-start' },
   empty: { paddingVertical: 64, alignItems: 'center', gap: 10 },
   emptyTitle: { color: colors.text, fontSize: 17, textAlign: 'center' },

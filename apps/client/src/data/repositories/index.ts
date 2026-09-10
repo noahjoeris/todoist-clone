@@ -7,5 +7,21 @@
  * repository so they can be unit-tested without a database.
  *
  */
+
+export {
+  AuthFailure,
+  type AuthFailureCode,
+  type AuthState,
+  type AuthUser,
+  type Credentials,
+  credentialsSchema,
+  MIN_PASSWORD_LENGTH,
+  verificationCodeSchema,
+} from './auth';
+export {
+  type AuthRepository,
+  createAuthRepository,
+  type SignUpOutcome,
+} from './auth-repository';
 export { type Task, type TaskInput, type TaskPriority, taskInputSchema } from './task';
 export { createTaskRepository, type TaskRepository } from './task-repository';

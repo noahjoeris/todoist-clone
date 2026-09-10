@@ -128,8 +128,38 @@ preserving IDs and copying successfully before removing local originals. Do not 
 guest table into a synced table in place or upload ownerless rows. Cloud adapters remain
 available but are not instantiated by the local-only composition root.
 
+### ADR-012 Supabase Auth behind an `AuthRepository`; guest tasks hidden while signed in
+
+Email/password authentication with email-code confirmation (`verifyOtp`, type `email`) is the
+first cloud feature. Consequences:
+
+- **Boundary.** `src/data/repositories/auth-repository.ts` is the only place the UI reaches auth
+  from. It exposes an observable `AuthState` (`restoring` / `restore-failed` / `signed-out` /
+  `signed-in`) and intention-revealing operations; every failure is an `AuthFailure` with an
+  app-level code and a user-facing message. Supabase sessions, tokens and error shapes never
+  leave `src/data`. The UI only learns the user's id and email.
+- **Optional configuration.** `loadSupabaseEnv()` reads only the two Supabase variables. Neither
+  set means guest-only mode; a partial or malformed pair is reported inside the app while guest
+  tasks keep working. PowerSync and API URLs are not read until the first synced table.
+- **Session persistence per platform (extends ADR-007).** `auth-storage.native.ts` supplies
+  AsyncStorage; `auth-storage.web.ts` leaves supabase-js on `localStorage`.
+  `auth-lifecycle.native.ts` starts/stops token auto-refresh from `AppState`; the web variant is
+  a no-op because supabase-js already reacts to `visibilitychange`. The deprecated `lock`
+  option is not used.
+- **Startup.** The root screen renders nothing until the stored session is resolved, so guest
+  tasks never flash before an account view. A failed restoration (typically offline with an
+  expired token) offers retry or an explicit "continue as guest"; after that choice, late
+  restoration results are ignored until the user acts. Nothing is deleted on auth failure.
+- **Guest tasks while signed in.** The signed-in view unmounts the guest list and composer and
+  shows an account placeholder. `local_tasks` rows are neither copied, uploaded, cleared nor
+  re-owned; they reappear after sign-out. Adoption into an account-owned synced table stays
+  deferred exactly as ADR-011 describes. Sign-out uses `scope: 'local'` so other devices keep
+  their sessions.
+- **Server side unchanged.** No Fastify routes, contracts, migrations or Sync Streams are added.
+  Password recovery, social login and the PowerSync connector come later.
+
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,
-different command), attachments/Storage, auth session persistence, the PowerSync backend
-connector and first synced table.
+different command), attachments/Storage, password recovery and social login, guest-task
+adoption, the PowerSync backend connector and first synced table.
