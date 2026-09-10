@@ -10,9 +10,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      client: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.client }}
+      api_image: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.api_image }}
+      compose: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.compose }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            client:
+              - 'apps/client/**'
+              - 'packages/contracts/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.npmrc'
+              - '.nvmrc'
+              - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
+            api_image:
+              - 'apps/api/**'
+              - 'apps/client/package.json'
+              - 'packages/contracts/**'
+              - 'packages/database/**'
+              - '.dockerignore'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.npmrc'
+              - 'tsconfig.base.json'
+              - 'tsconfig.node.json'
+              - '.github/workflows/ci.yml'
+            compose:
+              - 'compose.yaml'
+              - 'compose.supabase.yaml'
+              - 'compose.local.yaml'
+              - '.env.example'
+              - 'infra/**'
+              - '.github/workflows/ci.yml'
+
   checks:
     name: Typecheck, lint, test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -28,7 +77,10 @@ jobs:
 
   client-bundles:
     name: Expo web + iOS bundles
+    needs: changes
+    if: needs.changes.outputs.client == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -41,9 +93,27 @@ jobs:
       - run: pnpm --filter @todoist-clone/client export:web
       - run: pnpm --filter @todoist-clone/client exec expo export --platform ios
 
-  containers:
-    name: API image + compose config
+  compose-config:
+    name: Compose config
+    needs: changes
+    if: needs.changes.outputs.compose == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose files
+        run: |
+          cp .env.example .env
+          cp infra/supabase/.env.example infra/supabase/.env
+          docker compose -f compose.yaml config --quiet
+          docker compose --env-file infra/supabase/.env --env-file .env -f compose.yaml -f compose.supabase.yaml -f compose.local.yaml config --quiet
+
+  api-image:
+    name: API image
+    needs: changes
+    if: needs.changes.outputs.api_image == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -56,7 +126,7 @@ jobs:
           load: true
           tags: todoist-clone-api:ci
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=min' || '' }}
       - name: Smoke test API image
         run: |
           docker run -d --name api -p 3000:3000 \
@@ -70,9 +140,3 @@ jobs:
           done
           docker logs api
           exit 1
-      - name: Validate compose files
-        run: |
-          cp .env.example .env
-          cp infra/supabase/.env.example infra/supabase/.env
-          docker compose -f compose.yaml config --quiet
-          docker compose --env-file infra/supabase/.env --env-file .env -f compose.yaml -f compose.supabase.yaml -f compose.local.yaml config --quiet
