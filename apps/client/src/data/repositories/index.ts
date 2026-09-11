@@ -22,6 +22,7 @@ export {
   createAuthRepository,
   type SignUpOutcome,
 } from './auth-repository';
+export type { ClientSyncStatus, SyncStatusSource } from './sync';
 export { type Task, type TaskInput, type TaskPriority, taskInputSchema } from './task';
 export {
   createTaskRepositories,

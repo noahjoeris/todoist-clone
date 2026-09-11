@@ -6,16 +6,14 @@ import {
   type AuthRepository,
   createAuthRepository,
   createTaskRepositories,
+  type SyncStatusSource,
   type TaskRepositories,
 } from './repositories';
 import { registerAuthLifecycle } from './supabase/auth-lifecycle';
 import { createSupabaseClient } from './supabase/client';
 import { createBackendConnector } from './sync/backend-connector';
-import {
-  createSyncStatusSource,
-  type SyncStatusSource,
-  startSyncLifecycle,
-} from './sync/sync-lifecycle';
+import { createSyncStatusSource, startSyncLifecycle } from './sync/sync-lifecycle';
+import { createSyncOwnerStore } from './sync/sync-owner-store';
 
 /**
  * Composition root for client-side data access. Instantiate once per app and
@@ -73,7 +71,7 @@ function createCloudServices(powersync: CommonPowerSyncDatabase): {
         powersyncUrl: cloudEnv.env.powersyncUrl,
         apiUrl: cloudEnv.env.apiUrl,
       });
-      const stopSync = startSyncLifecycle(powersync, repository, connector);
+      const stopSync = startSyncLifecycle(powersync, repository, connector, createSyncOwnerStore());
       return {
         auth: { status: 'available', repository },
         sync: createSyncStatusSource(powersync),

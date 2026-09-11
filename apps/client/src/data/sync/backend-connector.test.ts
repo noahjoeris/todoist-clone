@@ -1,6 +1,10 @@
 import type { CommonPowerSyncDatabase, CrudEntry, CrudTransaction } from '@powersync/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type BackendConnectorOptions, createBackendConnector } from './backend-connector';
+import {
+  type BackendConnectorOptions,
+  createBackendConnector,
+  syncUploadUrl,
+} from './backend-connector';
 
 const powersyncUrl = 'https://powersync.example';
 const apiUrl = 'http://localhost:3000';
@@ -51,6 +55,13 @@ function jsonResponse(status: number, body: unknown = {}) {
     headers: { 'Content-Type': 'application/json' },
   });
 }
+
+describe('syncUploadUrl', () => {
+  it('joins /sync/upload without a double slash when the origin has a trailing slash', () => {
+    expect(syncUploadUrl('http://localhost:3000/')).toBe('http://localhost:3000/sync/upload');
+    expect(syncUploadUrl('http://localhost:3000')).toBe('http://localhost:3000/sync/upload');
+  });
+});
 
 describe('backend connector', () => {
   const fetch = vi.fn<typeof globalThis.fetch>();
@@ -190,6 +201,27 @@ describe('backend connector', () => {
         connector.uploadData(database as unknown as CommonPowerSyncDatabase),
       ).rejects.toThrow(`PowerSync upload failed (${status})`);
       expect(complete).not.toHaveBeenCalled();
+    });
+
+    it('posts to /sync/upload when the configured origin has a trailing slash', async () => {
+      const slashed = createBackendConnector({
+        auth: createAuth(getSession),
+        powersyncUrl,
+        apiUrl: `${apiUrl}/`,
+        fetch,
+      });
+      getSession.mockResolvedValue({ data: { session: session() }, error: null });
+      const database = {
+        getNextCrudTransaction: vi
+          .fn<CommonPowerSyncDatabase['getNextCrudTransaction']>()
+          .mockResolvedValueOnce(crudTransaction())
+          .mockResolvedValueOnce(null),
+      };
+      fetch.mockResolvedValue(jsonResponse(200, { applied: 1 }));
+
+      await slashed.uploadData(database as unknown as CommonPowerSyncDatabase);
+
+      expect(fetch.mock.calls[0]?.[0]).toBe(uploadUrl);
     });
 
     it('throws on network failure without completing the transaction', async () => {

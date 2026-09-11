@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { SyncStatusSource } from '../../data/sync/sync-lifecycle';
+import type { SyncStatusSource } from '../../data/repositories';
 
 export type SyncIndicator = 'offline' | 'syncing' | 'synced';
 

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AuthRepository, TaskRepositories } from '../data/repositories';
-import type { SyncStatusSource } from '../data/sync/sync-lifecycle';
+import type { AuthRepository, SyncStatusSource, TaskRepositories } from '../data/repositories';
 import type { DataSystem } from '../data/system';
 import { useAuthState } from './hooks/useAuthState';
 import { AccountScreen } from './screens/AccountScreen';

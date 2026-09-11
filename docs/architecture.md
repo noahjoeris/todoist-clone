@@ -232,19 +232,28 @@ the token never reaches the UI or `AuthRepository`. Consequences:
   `signed-out` → `disconnectAndClear({ clearLocal: false })` so `local_tasks` survive
   (the SDK default `clearLocal: true` would wipe them). Connect and clear are serialized
   on a promise chain. `restoring` / `restore-failed` are ignored. If the signed-in user
-  id changes without a sign-out, clear before connect.
-- **Uploads.** Each PowerSync transaction is `POST ${apiUrl}/sync/upload` with
-  `{ transactionId, operations: [{ clientId, table, id, op, opData }] }`. Do not
+  id changes without a sign-out, clear before connect. The queued-data owner is persisted
+  independently of the in-memory session: before connect, if that owner differs from the
+  signing-in user — or the owner is unknown and the upload queue is non-empty or
+  unreadable — clear first. Otherwise a crash after force-sign-out updates auth but
+  before clear finishes would let a later account upload the previous queue under its JWT.
+- **Uploads.** Each PowerSync transaction is `POST ${origin}/sync/upload` with
+  `{ transactionId, operations: [{ clientId, table, id, op, opData }] }`. The API origin
+  is stripped of trailing slashes and joined with `URL` so `EXPO_PUBLIC_API_URL` values
+  like `http://localhost:3000/` do not become `//sync/upload`. Do not
   `JSON.stringify` a `CrudEntry` (`toJSON()` emits `op_id/type/tx_id/data`). Local-only
   tables never write `ps_crud`, so `table: 'tasks'` is the only upload.
 - **HTTP.** 2xx → `complete()`. 400/403 → `console.error` the body and `complete()`.
   401 → throw (retry). 5xx / network → throw (retry).
-- **Sign-out with a non-empty upload queue.** Block the primary action (`Waiting for N
-  changes to sync…`) and offer a secondary **Sign out and discard**. Without this,
-  offline edits would be destroyed by `disconnectAndClear`.
+- **Sign-out with a non-empty upload queue.** The primary action stays disabled until
+  the queue count is known (fail closed; initial/unknown is not treated as empty). Once
+  known and non-empty, block with `Waiting for N changes to sync…` and offer a secondary
+  **Sign out and discard**. Without this, offline edits would be destroyed by
+  `disconnectAndClear`.
 - **UI.** Account-owned rows go through `TaskRepositories.forUser(userId)` (`tasks` +
-  `user_id`). The UI keeps repository `subscribe()` + `useSyncExternalStore`; it does
-  not use `@powersync/react`.
+  `user_id`). Sync status is `SyncStatusSource` from the repository layer; the UI never
+  imports `src/data/sync`. The UI keeps repository `subscribe()` + `useSyncExternalStore`;
+  it does not use `@powersync/react`.
 
 ## Deferred
 

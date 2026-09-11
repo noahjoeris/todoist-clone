@@ -8,8 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import type { Task, TaskRepository } from '../../data/repositories';
-import type { SyncStatusSource } from '../../data/sync/sync-lifecycle';
+import type { SyncStatusSource, Task, TaskRepository } from '../../data/repositories';
 import { ActionButton } from '../components/ActionButton';
 import { TaskComposer } from '../components/TaskComposer';
 import { TaskRow } from '../components/TaskRow';

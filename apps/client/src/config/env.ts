@@ -4,11 +4,17 @@ import { z } from 'zod';
 // referenced statically (no dynamic `process.env[name]` lookups).
 // Everything here ships to end users: only public configuration belongs in this file.
 
+function stripTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, '');
+}
+
 const cloudEnvSchema = z.object({
   supabaseUrl: z.url({ error: 'must be the project URL, e.g. https://<ref>.supabase.co' }),
   supabasePublishableKey: z.string().min(1, { error: 'must not be empty' }),
   powersyncUrl: z.url({ error: 'must be the PowerSync instance URL' }),
-  apiUrl: z.url({ error: 'must be the API origin, e.g. http://localhost:3000' }),
+  apiUrl: z
+    .url({ error: 'must be the API origin, e.g. http://localhost:3000' })
+    .transform(stripTrailingSlashes),
 });
 
 export type CloudEnv = z.infer<typeof cloudEnvSchema>;

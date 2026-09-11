@@ -22,7 +22,7 @@ export function createBackendConnector(
   options: BackendConnectorOptions,
 ): PowerSyncBackendConnector {
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
-  const uploadUrl = `${options.apiUrl}/sync/upload`;
+  const uploadUrl = syncUploadUrl(options.apiUrl);
 
   return {
     async fetchCredentials(): Promise<PowerSyncCredentials | null> {
@@ -94,6 +94,12 @@ async function uploadTransaction(
   // 401: token expired between getSession and the request; PowerSync retries after refresh.
   // 5xx / anything else: retry.
   throw new Error(`PowerSync upload failed (${response.status})`);
+}
+
+/** Resolves `/sync/upload` against the API origin even when the origin has a trailing slash. */
+export function syncUploadUrl(apiUrl: string): string {
+  const base = apiUrl.endsWith('/') ? apiUrl : `${apiUrl}/`;
+  return new URL('sync/upload', base).href;
 }
 
 function toUploadOperation(entry: CrudEntry) {

@@ -75,4 +75,13 @@ describe('loadCloudEnv', () => {
     if (result.status !== 'invalid') throw new Error('expected invalid');
     expect(result.error.message).toMatch(/EXPO_PUBLIC_SUPABASE_URL: must be the project URL/);
   });
+
+  it('strips trailing slashes from the API origin', () => {
+    stubConfigured();
+    vi.stubEnv(API_VAR, 'http://localhost:3000/');
+    expect(loadCloudEnv()).toEqual({
+      status: 'configured',
+      env: configured,
+    });
+  });
 });
