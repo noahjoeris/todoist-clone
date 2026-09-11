@@ -275,7 +275,8 @@ from before you signed in." **Add to my account** copies each row into `tasks` w
 `user_id` and the same `id`, then deletes `local_tasks`, all in one `writeTransaction`
 (one `ps_crud` transaction → one atomic `/sync/upload` batch once a connector is
 connected). **Not now** hides the prompt until the next sign-in (in-memory skip; `reset()`
-on sign-out). **Don't ask again** writes `local_preferences` (`id = 'guest-task-adoption'`,
+on sign-out, and when the signed-in user id changes without a sign-out). **Don't ask
+again** writes `local_preferences` (`id = 'guest-task-adoption'`,
 `value = 'dismissed'`), a local-only table that survives `disconnectAndClear({
 clearLocal: false })`.
 

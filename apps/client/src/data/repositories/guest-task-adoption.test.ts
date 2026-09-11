@@ -220,7 +220,7 @@ describe('guest-task adoption', () => {
     expect(repository.getState()).toEqual({ status: 'offer', count: 1 });
   });
 
-  it('persists dismiss in local_preferences', async () => {
+  it('persists dismiss through a PowerSync local_preferences view', async () => {
     insertLocalTask({ id: TASK_A, title: 'Later' });
     const repository = await createRepository();
 

@@ -92,8 +92,18 @@ function createCloudServices(
         createSyncOwnerStore(),
         localData,
       );
+      let adoptionSkipUserId: string | undefined;
       const stopAdoptionReset = repository.subscribe((state) => {
-        if (state.status === 'signed-out') guestTaskAdoption.reset();
+        if (state.status === 'signed-out') {
+          adoptionSkipUserId = undefined;
+          guestTaskAdoption.reset();
+          return;
+        }
+        if (state.status !== 'signed-in') return;
+        if (adoptionSkipUserId !== undefined && adoptionSkipUserId !== state.user.id) {
+          guestTaskAdoption.reset();
+        }
+        adoptionSkipUserId = state.user.id;
       });
       return {
         auth: { status: 'available', repository },

@@ -15,10 +15,10 @@ interface AccountScreenProps {
 }
 
 /**
- * Account settings while signed in. Guest tasks stay in the local-only table and
- * reappear after sign-out (see ADR-011 / ADR-012). Sign-out is blocked until the
- * upload-queue size is known, and while uploads are queued, so `disconnectAndClear`
- * cannot discard unsynced account edits.
+ * Account settings while signed in. Guest tasks stay in the local-only table unless
+ * adopted into this account (ADR-016) and reappear after sign-out (ADR-011 / ADR-012).
+ * Sign-out is blocked until the upload-queue size is known, and while uploads are
+ * queued, so `disconnectAndClear` cannot discard unsynced account edits.
  */
 export function AccountScreen({ auth, user, onBack, sync }: AccountScreenProps) {
   const { pending, error, run } = useAuthAction();
