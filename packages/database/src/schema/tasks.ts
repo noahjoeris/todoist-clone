@@ -32,6 +32,7 @@ export const tasks = pgTable(
     priority: smallint('priority').notNull().default(4),
     scheduledDate: date('scheduled_date', { mode: 'string' }),
     scheduledTime: time('scheduled_time', { precision: 0 }),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'string' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .notNull()
       .defaultNow(),

@@ -82,6 +82,32 @@ describe('taskColumnsSchema', () => {
       false,
     );
   });
+
+  it('accepts a completed_at timestamp', () => {
+    expect(
+      taskColumnsSchema.parse({
+        ...validPutData,
+        completed_at: '2026-09-11T15:00:00.000Z',
+      }).completed_at,
+    ).toBe('2026-09-11T15:00:00.000Z');
+  });
+
+  it('accepts explicit null completed_at (active)', () => {
+    expect(
+      taskColumnsSchema.parse({ ...validPutData, completed_at: null }).completed_at,
+    ).toBeNull();
+  });
+
+  it('treats omitted completed_at as active (PowerSync omits nulls)', () => {
+    expect(taskColumnsSchema.parse(validPutData).completed_at).toBeUndefined();
+  });
+
+  it.each(['not-a-date', '2026-09-11', '2026-09-11T15:00:00'])(
+    'rejects invalid completed_at %s',
+    (completed_at) => {
+      expect(taskColumnsSchema.safeParse({ ...validPutData, completed_at }).success).toBe(false);
+    },
+  );
 });
 
 describe('taskPatchColumnsSchema', () => {
@@ -112,6 +138,27 @@ describe('taskPatchColumnsSchema', () => {
       scheduled_date: null,
     });
   });
+
+  it('accepts a completed_at timestamp', () => {
+    expect(taskPatchColumnsSchema.parse({ completed_at: '2026-09-11T15:00:00.000Z' })).toEqual({
+      completed_at: '2026-09-11T15:00:00.000Z',
+    });
+  });
+
+  it('accepts explicit null completed_at (reopen)', () => {
+    expect(taskPatchColumnsSchema.parse({ completed_at: null })).toEqual({ completed_at: null });
+  });
+
+  it('omits completed_at when it is not in the patch', () => {
+    expect(taskPatchColumnsSchema.parse({ title: 'Renamed' })).toEqual({ title: 'Renamed' });
+  });
+
+  it.each(['yesterday', '2026-09-11T15:00:00'])(
+    'rejects invalid completed_at %s',
+    (completed_at) => {
+      expect(taskPatchColumnsSchema.safeParse({ completed_at }).success).toBe(false);
+    },
+  );
 });
 
 describe('mergeScheduledColumns', () => {

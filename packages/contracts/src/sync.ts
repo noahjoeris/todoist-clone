@@ -25,6 +25,9 @@ export type ScheduledColumns = {
 /**
  * PowerSync SQLite / upload-wire columns for `tasks`.
  * `id`, `user_id` and `updated_at` are stripped if present — the server owns them.
+ *
+ * `completed_at` is a client-owned timestamp. PUT omission or null means active
+ * (PowerSync omits nulls). PATCH omission means unchanged; explicit null reopens.
  */
 export const taskColumnsSchema = z
   .object({
@@ -33,6 +36,7 @@ export const taskColumnsSchema = z
     priority: z.number().int().min(1).max(4),
     scheduled_date: z.iso.date().nullable().optional(),
     scheduled_time: scheduledTimeSchema.nullable().optional(),
+    completed_at: z.iso.datetime({ offset: true }).nullable().optional(),
     created_at: z.iso.datetime({ offset: true }),
   })
   .strip()
@@ -48,6 +52,7 @@ export const taskPatchColumnsSchema = z
     priority: z.number().int().min(1).max(4).optional(),
     scheduled_date: z.iso.date().nullable().optional(),
     scheduled_time: scheduledTimeSchema.nullable().optional(),
+    completed_at: z.iso.datetime({ offset: true }).nullable().optional(),
     created_at: z.iso.datetime({ offset: true }).optional(),
   })
   .strip()

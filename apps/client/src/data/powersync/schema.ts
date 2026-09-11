@@ -15,6 +15,7 @@ const localTasks = new Table(
     priority: column.integer,
     scheduled_date: column.text,
     scheduled_time: column.text,
+    completed_at: column.text,
     created_at: column.text,
   },
   { localOnly: true },
@@ -32,6 +33,7 @@ const tasks = new Table({
   priority: column.integer,
   scheduled_date: column.text,
   scheduled_time: column.text,
+  completed_at: column.text,
   created_at: column.text,
   updated_at: column.text,
 });
