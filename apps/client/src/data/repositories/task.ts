@@ -18,4 +18,26 @@ export const taskInputSchema = z
   });
 
 export type TaskInput = z.input<typeof taskInputSchema>;
-export type Task = z.output<typeof taskInputSchema> & { id: string; createdAt: string };
+export type Task = z.output<typeof taskInputSchema> & {
+  id: string;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export class TaskNotFoundError extends Error {
+  readonly code = 'not-found' as const;
+
+  constructor() {
+    super('Task not found');
+    this.name = 'TaskNotFoundError';
+  }
+}
+
+export class TaskRestoreConflictError extends Error {
+  readonly code = 'restore-conflict' as const;
+
+  constructor() {
+    super('A task with this id already exists');
+    this.name = 'TaskRestoreConflictError';
+  }
+}
