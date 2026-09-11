@@ -8,29 +8,39 @@ import {
   Text,
   View,
 } from 'react-native';
-import type { Task, TaskRepository } from '../../data/repositories';
+import type { SyncStatusSource, Task, TaskRepository } from '../../data/repositories';
 import { ActionButton } from '../components/ActionButton';
 import { TaskComposer } from '../components/TaskComposer';
 import { TaskRow } from '../components/TaskRow';
+import { useSyncStatus } from '../hooks/useSyncStatus';
 import { colors } from '../theme';
 
 /** How the guest screen offers (or explains the absence of) account sign-in. */
 export type AccountEntry =
   | { kind: 'hidden' }
   | { kind: 'sign-in'; onPress: () => void }
-  | { kind: 'unavailable'; message: string };
+  | { kind: 'unavailable'; message: string }
+  | { kind: 'account'; label: string; onPress: () => void };
 
 interface HomeScreenProps {
   repository: TaskRepository;
   account: AccountEntry;
+  sync?: SyncStatusSource;
 }
 
-export function HomeScreen({ repository, account }: HomeScreenProps) {
+const SYNC_LABEL: Record<NonNullable<ReturnType<typeof useSyncStatus>>, string> = {
+  offline: 'Offline',
+  syncing: 'Syncing',
+  synced: 'Synced',
+};
+
+export function HomeScreen({ repository, account, sync }: HomeScreenProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [composing, setComposing] = useState(false);
+  const syncIndicator = useSyncStatus(sync);
 
   useEffect(() => {
     // Retry subscribes afresh, including a fresh read of the local database.
@@ -73,9 +83,17 @@ export function HomeScreen({ repository, account }: HomeScreenProps) {
                   {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}
                 </Text>
               )}
-              {account.kind === 'sign-in' && (
+              {syncIndicator && (
+                <Text accessibilityLiveRegion="polite" style={styles.sync}>
+                  {SYNC_LABEL[syncIndicator]}
+                </Text>
+              )}
+              {(account.kind === 'sign-in' || account.kind === 'account') && (
                 <View style={styles.account}>
-                  <ActionButton label="Sign in" onPress={account.onPress} />
+                  <ActionButton
+                    label={account.kind === 'sign-in' ? 'Sign in' : account.label}
+                    onPress={account.onPress}
+                  />
                 </View>
               )}
             </View>
@@ -135,6 +153,7 @@ const styles = StyleSheet.create({
   heading: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   title: { color: colors.text, fontSize: 28, fontWeight: '700' },
   count: { color: colors.muted, fontSize: 13 },
+  sync: { color: colors.muted, fontSize: 13 },
   account: { marginLeft: 'auto' },
   authUnavailable: { color: colors.error, fontSize: 13, lineHeight: 18 },
   add: { alignSelf: 'flex-start' },

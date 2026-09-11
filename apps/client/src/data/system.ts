@@ -1,28 +1,37 @@
 import type { CommonPowerSyncDatabase } from '@powersync/common';
 import { randomUUID } from 'expo-crypto';
-import { loadSupabaseEnv } from '../config/env';
+import { loadCloudEnv } from '../config/env';
 import { createPowerSyncDatabase } from './powersync/create-database';
 import {
   type AuthRepository,
   createAuthRepository,
-  createTaskRepository,
-  type TaskRepository,
+  createTaskRepositories,
+  type SyncStatusSource,
+  type TaskRepositories,
 } from './repositories';
 import { registerAuthLifecycle } from './supabase/auth-lifecycle';
 import { createSupabaseClient } from './supabase/client';
+import { createBackendConnector } from './sync/backend-connector';
+import {
+  createLocalDataReadiness,
+  createSyncStatusSource,
+  startSyncLifecycle,
+} from './sync/sync-lifecycle';
+import { createSyncOwnerStore } from './sync/sync-owner-store';
 
 /**
  * Composition root for client-side data access. Instantiate once per app and
  * hand repositories the `powersync` instance; UI code should not import this directly.
  *
- * `powersync.connect(...)` is intentionally not called yet: the backend connector
- * (auth token + upload queue handler) arrives in a later change. The `tasks` table
- * is already in the client schema so downloaded rows can materialize once connected.
+ * When cloud env is configured, a backend connector uploads to the Fastify API and
+ * `startSyncLifecycle` connects PowerSync for signed-in users.
  */
 export interface DataSystem {
   powersync: CommonPowerSyncDatabase;
-  tasks: TaskRepository;
+  tasks: TaskRepositories;
   auth: AuthAvailability;
+  sync?: SyncStatusSource;
+  dispose(): void;
 }
 
 /**
@@ -36,25 +45,52 @@ export type AuthAvailability =
 
 export function createDataSystem(): DataSystem {
   const powersync = createPowerSyncDatabase();
+  const tasks = createTaskRepositories(powersync, randomUUID);
+  const cloud = createCloudServices(powersync);
   return {
     powersync,
-    tasks: createTaskRepository(powersync, randomUUID),
-    auth: createAuthAvailability(),
+    tasks,
+    auth: cloud.auth,
+    ...(cloud.sync ? { sync: cloud.sync } : {}),
+    dispose: cloud.dispose,
   };
 }
 
-function createAuthAvailability(): AuthAvailability {
-  const supabaseEnv = loadSupabaseEnv();
-  switch (supabaseEnv.status) {
+function createCloudServices(powersync: CommonPowerSyncDatabase): {
+  auth: AuthAvailability;
+  sync?: SyncStatusSource;
+  dispose(): void;
+} {
+  const cloudEnv = loadCloudEnv();
+  switch (cloudEnv.status) {
     case 'unconfigured':
-      return { status: 'unconfigured' };
+      return { auth: { status: 'unconfigured' }, dispose() {} };
     case 'invalid':
-      return { status: 'misconfigured', error: supabaseEnv.error };
+      return { auth: { status: 'misconfigured', error: cloudEnv.error }, dispose() {} };
     case 'configured': {
-      const supabase = createSupabaseClient(supabaseEnv.env);
+      const supabase = createSupabaseClient(cloudEnv.env);
+      const repository = createAuthRepository(supabase.auth, registerAuthLifecycle);
+      const localData = createLocalDataReadiness();
+      const stopSync = startSyncLifecycle(
+        powersync,
+        repository,
+        (userId) =>
+          createBackendConnector({
+            auth: supabase.auth,
+            powersyncUrl: cloudEnv.env.powersyncUrl,
+            apiUrl: cloudEnv.env.apiUrl,
+            expectedUserId: userId,
+          }),
+        createSyncOwnerStore(),
+        localData,
+      );
       return {
-        status: 'available',
-        repository: createAuthRepository(supabase.auth, registerAuthLifecycle),
+        auth: { status: 'available', repository },
+        sync: createSyncStatusSource(powersync, localData),
+        dispose() {
+          stopSync();
+          repository.dispose();
+        },
       };
     }
   }
