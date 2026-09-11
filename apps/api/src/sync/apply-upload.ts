@@ -125,6 +125,7 @@ async function mergeSchedulePatch(
     return opData;
   }
 
+  // Lock until this transaction's UPDATE so a concurrent PATCH cannot stale the merge.
   const [existing] = await tx
     .select({
       userId: tasks.userId,
@@ -133,7 +134,8 @@ async function mergeSchedulePatch(
     })
     .from(tasks)
     .where(eq(tasks.id, operation.id))
-    .limit(1);
+    .limit(1)
+    .for('update');
 
   if (!existing) {
     return null;
