@@ -7,6 +7,7 @@ import {
   credentialsSchema,
   toAuthFailure,
 } from './auth';
+import type { AuthUrlError } from './auth-url';
 
 export type SignUpOutcome = 'confirmation-required' | 'signed-in';
 
@@ -45,9 +46,18 @@ export type AuthClient = Pick<
 /** Platform hook for pausing token refresh in the background; returns a cleanup function. */
 export type RegisterLifecycle = (auth: AuthClient) => () => void;
 
+export interface AuthRepositoryOptions {
+  /**
+   * Auth error captured from the page URL before supabase-js consumes it (web confirmation
+   * / recovery redirects). Native omits this; deep links are a separate issue.
+   */
+  urlAuthError?: AuthUrlError | null;
+}
+
 export function createAuthRepository(
   auth: AuthClient,
   registerLifecycle: RegisterLifecycle,
+  options: AuthRepositoryOptions = {},
 ): AuthRepository {
   let state: AuthState = { status: 'restoring' };
   const listeners = new Set<(state: AuthState) => void>();
@@ -103,7 +113,17 @@ export function createAuthRepository(
         try {
           const { data, error } = await auth.getSession();
           if (error) throw error;
-          if (generation === restorationGeneration) applySession(data.session);
+          if (generation !== restorationGeneration) return;
+          if (data.session) {
+            applySession(data.session);
+            return;
+          }
+          const redirectError = options.urlAuthError
+            ? toAuthFailure(options.urlAuthError)
+            : undefined;
+          setState(
+            redirectError ? { status: 'signed-out', redirectError } : { status: 'signed-out' },
+          );
         } catch (error) {
           if (generation === restorationGeneration) {
             setState({ status: 'restore-failed', error: toAuthFailure(error) });

@@ -3,6 +3,7 @@ import { AuthApiError, AuthRetryableFetchError } from '@supabase/supabase-js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthFailure } from './auth';
 import { type AuthClient, createAuthRepository } from './auth-repository';
+import { AuthUrlError } from './auth-url';
 
 const credentials = { email: 'ada@example.com', password: 'secret1' };
 
@@ -98,6 +99,48 @@ describe('auth repository', () => {
       const repository = createRepository();
       await repository.restoreSession();
       expect(repository.getState()).toEqual({ status: 'signed-out' });
+    });
+
+    it('attaches a URL redirect error when restore finds no session', async () => {
+      auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+      const urlAuthError = new AuthUrlError('otp_expired', 'Email link is invalid or has expired');
+      const repository = createAuthRepository(auth, registerLifecycle, { urlAuthError });
+      await repository.restoreSession();
+
+      const state = repository.getState();
+      expect(state.status).toBe('signed-out');
+      if (state.status !== 'signed-out') throw new Error('expected signed-out');
+      expect(state.redirectError).toMatchObject({
+        code: 'otp-expired',
+        message: 'This link has expired. Request a new one and try again.',
+      });
+    });
+
+    it('ignores a URL redirect error when a session is restored', async () => {
+      auth.getSession.mockResolvedValue({ data: { session: session() }, error: null });
+      const repository = createAuthRepository(auth, registerLifecycle, {
+        urlAuthError: new AuthUrlError('otp_expired', 'expired'),
+      });
+      await repository.restoreSession();
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+      });
+    });
+
+    it('prefers a session restore failure over a URL redirect error', async () => {
+      auth.getSession.mockResolvedValue({
+        data: { session: null },
+        error: new AuthRetryableFetchError('fetch failed', 0),
+      });
+      const repository = createAuthRepository(auth, registerLifecycle, {
+        urlAuthError: new AuthUrlError('otp_expired', 'expired'),
+      });
+      await repository.restoreSession();
+      const state = repository.getState();
+      expect(state.status).toBe('restore-failed');
+      if (state.status !== 'restore-failed') throw new Error('expected restore-failed');
+      expect(state.error.code).toBe('network');
     });
 
     it('reports a failed restoration without discarding anything', async () => {

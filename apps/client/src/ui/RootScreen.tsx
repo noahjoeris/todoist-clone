@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type {
+  AuthFailure,
   AuthRepository,
   GuestTaskAdoptionRepository,
   SyncStatusSource,
@@ -54,7 +55,7 @@ export function RootScreen({ system }: { system: DataSystem }) {
 }
 
 type AuthScreen =
-  | { name: 'sign-in' }
+  | { name: 'sign-in'; error?: AuthFailure }
   | { name: 'sign-up' }
   | { name: 'confirm'; email: string }
   | { name: 'account' };
@@ -80,9 +81,20 @@ function AccountAwareScreen({
   );
 
   // Successful sign-in returns to the account task list; sign-out leaves the account sub-screen.
+  // An expired confirmation redirect is signed-out with `redirectError` — open Sign in once.
   useEffect(() => {
-    if (authState.status === 'signed-in' || authState.status === 'signed-out') setScreen(null);
-  }, [authState.status]);
+    if (authState.status === 'signed-in') {
+      setScreen(null);
+      return;
+    }
+    if (authState.status !== 'signed-out') return;
+    const state = auth.getState();
+    setScreen(
+      state.status === 'signed-out' && state.redirectError
+        ? { name: 'sign-in', error: state.redirectError }
+        : null,
+    );
+  }, [auth, authState.status]);
 
   switch (authState.status) {
     case 'restoring':
@@ -141,6 +153,7 @@ function AccountAwareScreen({
           onCreateAccount={() => setScreen({ name: 'sign-up' })}
           onConfirmEmail={(email) => setScreen({ name: 'confirm', email })}
           onCancel={() => setScreen(null)}
+          {...(screen.error ? { initialError: screen.error } : {})}
         />
       );
     case 'sign-up':

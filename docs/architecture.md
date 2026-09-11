@@ -154,9 +154,13 @@ Supabase Cloud only allows editing the email template with custom SMTP.) Consequ
   leaves URL session detection off (no deep link yet; after confirming in the browser the user
   signs in with their password). `auth-platform.web.ts` keeps supabase-js on `localStorage`
   and enables `detectSessionInUrl`, so the confirmation redirect to the Site URL signs the
-  user in. `auth-lifecycle.native.ts` starts/stops token auto-refresh from `AppState`; the web
-  variant is a no-op because supabase-js already reacts to `visibilitychange`. The deprecated
-  `lock` option is not used.
+  user in. Failed redirects (`error` / `error_code` / `error_description` in the query or
+  fragment, typically `otp_expired`) are parsed from the URL before supabase-js runs and
+  surfaced as an `AuthFailure` on `signed-out` (`redirectError`) so Sign in can show them
+  and offer the existing resend-confirmation path. Native does not read the page URL
+  (deep links are a separate issue). `auth-lifecycle.native.ts` starts/stops token
+  auto-refresh from `AppState`; the web variant is a no-op because supabase-js already
+  reacts to `visibilitychange`. The deprecated `lock` option is not used.
 - **Startup.** The root screen renders nothing until the stored session is resolved, so guest
   tasks never flash before an account view. A failed restoration (typically offline with an
   expired token) offers retry or an explicit "continue as guest"; after that choice, late

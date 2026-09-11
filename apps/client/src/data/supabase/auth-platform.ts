@@ -12,6 +12,11 @@ export interface AuthPlatformOptions {
   storage?: SupportedStorage;
   /** Whether to pick up a session from the page URL after an email confirmation redirect. */
   detectSessionInUrl: boolean;
+  /**
+   * Current page URL so confirmation/recovery error params can be parsed before
+   * supabase-js consumes them. Web only; native deep links are a separate issue.
+   */
+  getLocationHref?: () => string;
 }
 
 export const authPlatformOptions: AuthPlatformOptions = {
