@@ -147,9 +147,9 @@ Supabase Cloud only allows editing the email template with custom SMTP.) Consequ
   `signed-in`) and intention-revealing operations; every failure is an `AuthFailure` with an
   app-level code and a user-facing message. Supabase sessions, tokens and error shapes never
   leave `src/data`. The UI only learns the user's id and email.
-- **Optional configuration.** `loadSupabaseEnv()` reads only the two Supabase variables. Neither
-  set means guest-only mode; a partial or malformed pair is reported inside the app while guest
-  tasks keep working. PowerSync and API URLs are not read until the first synced table.
+- **Optional configuration.** `loadCloudEnv()` reads the four public variables (Supabase URL and
+  publishable key, PowerSync URL, API URL). All unset means guest-only mode; a partial or
+  malformed set is reported inside the app while guest tasks keep working.
 - **Platform options (extends ADR-007).** `auth-platform.native.ts` supplies AsyncStorage and
   leaves URL session detection off (no deep link yet; after confirming in the browser the user
   signs in with their password). `auth-platform.web.ts` keeps supabase-js on `localStorage`
@@ -164,13 +164,13 @@ Supabase Cloud only allows editing the email template with custom SMTP.) Consequ
   applied. A failed sign-in or a confirmation-required sign-up does not lift that guard.
   Nothing is deleted on auth failure.
 - **Guest tasks while signed in.** The signed-in view unmounts the guest list and composer and
-  shows an account placeholder. `local_tasks` rows are neither copied, uploaded, cleared nor
-  re-owned; they reappear after sign-out. Adoption into an account-owned synced table stays
-  deferred exactly as ADR-011 describes. Sign-out uses `scope: 'local'` so other devices keep
-  their sessions, and local state becomes signed-out even if the revoke request fails.
-- **Server side.** This ADR covers the client boundary only. The API verifies the same
-  Supabase access tokens (ADR-013). Password recovery, social login and the PowerSync
-  connector come later.
+  shows the account-owned `tasks` list (ADR-015). `local_tasks` rows are neither copied,
+  uploaded, cleared nor re-owned; they reappear after sign-out. Adoption into the account-owned
+  synced table stays deferred exactly as ADR-011 describes. Sign-out uses `scope: 'local'` so
+  other devices keep their sessions, and local state becomes signed-out even if the revoke
+  request fails.
+- **Server side.** This ADR covers the client auth boundary. The API verifies the same
+  Supabase access tokens (ADR-013). Password recovery and social login come later.
 
 ### ADR-013 The API verifies Supabase JWTs via JWKS (asymmetric only)
 
@@ -211,18 +211,43 @@ to `POST /sync/upload`. The API applies a batch atomically in one Drizzle transa
   time-only patch on a dated row is allowed. An explicit time without a date is
   400 `invalid-request`.
 - Any 403 rolls back the whole batch, including earlier PUTs in that request.
-- **Connector (next PR):** 2xx / 4xx → `complete()` the PowerSync transaction (4xx is a
-  client bug or abuse; the SQLite batch is discarded). 5xx / network → retry.
+- **Connector:** 2xx → `complete()` the PowerSync transaction. 400/403 → log the body and
+  `complete()` (client bug or abuse; the SQLite batch is discarded). **401 throws** so
+  PowerSync retries after a token refresh. 5xx / network → throw (retry). See ADR-015.
 - **RLS** is enabled with no policies (deny-all for PostgREST roles). The table owner
   (API / `postgres`) bypasses RLS; there is no FORCE. The FK
   `tasks.user_id → auth.users(id) ON DELETE CASCADE` is raw SQL so drizzle-kit never
   models `auth` (ADR-004). Referencing `auth` is not modifying it.
 - `scheduled_time` is stored as `time(0)` (`HH:mm:ss`). The wire also accepts `HH:mm`.
 - Client PowerSync schema includes `tasks` (mirrors `public.tasks` / `user_tasks`).
-  The backend connector is still deferred. Guest-task adoption stays as ADR-011.
+  Guest-task adoption stays as ADR-011.
+
+### ADR-015 Connector: Supabase session is the PowerSync credential
+
+Signed-in clients connect to PowerSync with the Supabase access token (PowerSync Cloud
+"Use Supabase Auth" accepts it as-is). The connector and lifecycle live in `src/data`;
+the token never reaches the UI or `AuthRepository`. Consequences:
+
+- **Connect / clear.** `signed-in` → `powersync.connect(connector)`. Transition to
+  `signed-out` → `disconnectAndClear({ clearLocal: false })` so `local_tasks` survive
+  (the SDK default `clearLocal: true` would wipe them). Connect and clear are serialized
+  on a promise chain. `restoring` / `restore-failed` are ignored. If the signed-in user
+  id changes without a sign-out, clear before connect.
+- **Uploads.** Each PowerSync transaction is `POST ${apiUrl}/sync/upload` with
+  `{ transactionId, operations: [{ clientId, table, id, op, opData }] }`. Do not
+  `JSON.stringify` a `CrudEntry` (`toJSON()` emits `op_id/type/tx_id/data`). Local-only
+  tables never write `ps_crud`, so `table: 'tasks'` is the only upload.
+- **HTTP.** 2xx → `complete()`. 400/403 → `console.error` the body and `complete()`.
+  401 → throw (retry). 5xx / network → throw (retry).
+- **Sign-out with a non-empty upload queue.** Block the primary action (`Waiting for N
+  changes to sync…`) and offer a secondary **Sign out and discard**. Without this,
+  offline edits would be destroyed by `disconnectAndClear`.
+- **UI.** Account-owned rows go through `TaskRepositories.forUser(userId)` (`tasks` +
+  `user_id`). The UI keeps repository `subscribe()` + `useSyncExternalStore`; it does
+  not use `@powersync/react`.
 
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,
 different command), attachments/Storage, password recovery and social login, guest-task
-adoption, the PowerSync backend connector.
+adoption.

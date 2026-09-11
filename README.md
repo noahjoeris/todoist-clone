@@ -27,9 +27,9 @@ compose.local.yaml      Local overlays (ES256 JWT on auth, PowerSync) + API
 
 The client currently supports local guest tasks (title, description, priority, date and optional
 time) with a live list, plus email/password accounts with email-link confirmation and persistent
-sessions. Guest tasks stay on the device and are hidden while signed in; account task sync is
-not implemented yet. Guest-only use needs no `.env`: run `pnpm install`, `pnpm build`, then
-`pnpm --filter @todoist-clone/client web` (or a native development build).
+sessions. Guest tasks stay on the device and are hidden while signed in; signed-in users sync
+account-owned tasks through PowerSync. Guest-only use needs no `.env`: run `pnpm install`,
+`pnpm build`, then `pnpm --filter @todoist-clone/client web` (or a native development build).
 
 ```sh
 pnpm install
@@ -43,8 +43,9 @@ Fill both env files. Two ways to provide the backing services:
 ### A. Cloud (default for development)
 
 1. Create a Supabase project. Copy URL, publishable key, secret key, pooler + direct DB URLs into the env files.
-   For authentication only, the client needs just `EXPO_PUBLIC_SUPABASE_URL` and
-   `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; see [Authentication setup](#authentication-setup).
+   Accounts and sync need all four client variables together (`EXPO_PUBLIC_SUPABASE_URL`,
+   `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `EXPO_PUBLIC_POWERSYNC_URL`, `EXPO_PUBLIC_API_URL`);
+   see [Authentication setup](#authentication-setup).
 2. Prepare the database for PowerSync (replication role + empty `powersync` publication),
    then apply Drizzle migrations (creates `public.tasks` and adds it to the publication):
    `psql "<direct connection string>" -v powersync_password='...' -f infra/powersync/bootstrap-source-db.sql`
@@ -52,7 +53,9 @@ Fill both env files. Two ways to provide the backing services:
 3. Create a PowerSync Cloud instance: connect it to the Supabase DB as `powersync_role`,
    enable **Use Supabase Auth**, and deploy the contents of `infra/powersync/sync-config.yaml`
    (defines the `user_tasks` stream).
-4. Put the instance URL in `EXPO_PUBLIC_POWERSYNC_URL` (used by the connector PR).
+4. Put the instance URL in `EXPO_PUBLIC_POWERSYNC_URL` and the Fastify origin in
+   `EXPO_PUBLIC_API_URL`. For web, set the API `CORS_ORIGIN` to the Expo origin
+   (e.g. `http://localhost:8081`).
 
 ### B. Fully self-hosted (Docker)
 
@@ -83,7 +86,8 @@ Accounts are email + password with confirmation through the link in Supabase's d
    (https://supabase.com/docs/guides/auth/auth-smtp), which also unlocks template editing.
 
 Sessions persist in AsyncStorage on native and `localStorage` on web. Sign-out only ends the
-current device's session.
+current device's session. A non-empty PowerSync upload queue blocks sign-out until the
+changes sync, with a secondary **Sign out and discard**.
 
 The Fastify API verifies those access tokens against the project's JWKS
 (`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`), ES256 only. Cloud projects need
@@ -91,13 +95,22 @@ asymmetric JWT signing keys (the default for new projects; legacy HS256 projects
 under **Authentication → JWT Signing Keys**). The local stack needs `JWT_KEYS` in
 `infra/supabase/.env` (from `utils/add-new-auth-keys.sh --update-env`; restore any
 vendored `docker-compose.yml` edit — `compose.local.yaml` overlays `GOTRUE_JWT_KEYS` on
-Auth). Smoke test:
+Auth). The same token authenticates PowerSync (Use Supabase Auth) and `POST /sync/upload`.
+Web uploads need the API to allow the Expo origin:
+
+```sh
+# repo-root .env — required for the web client talking to a local API
+CORS_ORIGIN=http://localhost:8081
+```
+
+Smoke test (API JWT + a signed-in session that can upload):
 
 ```sh
 curl -H "Authorization: Bearer <access_token>" http://localhost:3000/me
 ```
 
-On web the access token is in `localStorage` under `sb-<project-ref>-auth-token`.
+On web the access token is in `localStorage` under `sb-<project-ref>-auth-token`. After
+sign-in, creating an account task should POST it to `/sync/upload` and show **Synced**.
 
 ## Commands
 
