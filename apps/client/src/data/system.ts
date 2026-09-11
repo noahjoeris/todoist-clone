@@ -12,7 +12,11 @@ import {
 import { registerAuthLifecycle } from './supabase/auth-lifecycle';
 import { createSupabaseClient } from './supabase/client';
 import { createBackendConnector } from './sync/backend-connector';
-import { createSyncStatusSource, startSyncLifecycle } from './sync/sync-lifecycle';
+import {
+  createLocalDataReadiness,
+  createSyncStatusSource,
+  startSyncLifecycle,
+} from './sync/sync-lifecycle';
 import { createSyncOwnerStore } from './sync/sync-owner-store';
 
 /**
@@ -66,15 +70,23 @@ function createCloudServices(powersync: CommonPowerSyncDatabase): {
     case 'configured': {
       const supabase = createSupabaseClient(cloudEnv.env);
       const repository = createAuthRepository(supabase.auth, registerAuthLifecycle);
-      const connector = createBackendConnector({
-        auth: supabase.auth,
-        powersyncUrl: cloudEnv.env.powersyncUrl,
-        apiUrl: cloudEnv.env.apiUrl,
-      });
-      const stopSync = startSyncLifecycle(powersync, repository, connector, createSyncOwnerStore());
+      const localData = createLocalDataReadiness();
+      const stopSync = startSyncLifecycle(
+        powersync,
+        repository,
+        (userId) =>
+          createBackendConnector({
+            auth: supabase.auth,
+            powersyncUrl: cloudEnv.env.powersyncUrl,
+            apiUrl: cloudEnv.env.apiUrl,
+            expectedUserId: userId,
+          }),
+        createSyncOwnerStore(),
+        localData,
+      );
       return {
         auth: { status: 'available', repository },
-        sync: createSyncStatusSource(powersync),
+        sync: createSyncStatusSource(powersync, localData),
         dispose() {
           stopSync();
           repository.dispose();

@@ -228,16 +228,28 @@ Signed-in clients connect to PowerSync with the Supabase access token (PowerSync
 "Use Supabase Auth" accepts it as-is). The connector and lifecycle live in `src/data`;
 the token never reaches the UI or `AuthRepository`. Consequences:
 
-- **Connect / clear.** `signed-in` → `powersync.connect(connector)`. Transition to
-  `signed-out` → `disconnectAndClear({ clearLocal: false })` so `local_tasks` survive
-  (the SDK default `clearLocal: true` would wipe them). Connect and clear are serialized
-  on a promise chain. `restoring` / `restore-failed` are ignored. If the signed-in user
-  id changes without a sign-out, clear before connect. The queued-data owner is persisted
-  independently of the in-memory session: before connect, if that owner differs from the
-  signing-in user — or the owner is unknown and the upload queue is non-empty or
-  unreadable — clear first. Otherwise a crash after force-sign-out updates auth but
-  before clear finishes would let a later account upload the previous queue under its JWT.
-- **Uploads.** Each PowerSync transaction is `POST ${origin}/sync/upload` with
+- **Connect / clear.** `signed-in` → `powersync.connect` with a connector bound to that
+  account. Transition to `signed-out` → `disconnectAndClear({ clearLocal: false })` so
+  `local_tasks` survive (the SDK default `clearLocal: true` would wipe them). Connect and
+  clear are serialized on a promise chain. `restoring` / `restore-failed` are ignored. If
+  the signed-in user id changes without a sign-out, clear before connect. The queued-data
+  owner is persisted independently of the in-memory session: before connect, if that owner
+  differs from the signing-in user — or the owner is unknown and the upload queue is
+  non-empty or unreadable — clear first. Otherwise a crash after force-sign-out updates
+  auth but before clear finishes would let a later account upload the previous queue under
+  its JWT. The in-memory initialized user is recorded only after persist-owner and connect
+  both succeed; a failure stays retryable on a later `signed-in` event. Serializing
+  connect/clear does not protect an already-running `uploadData` loop — that is the
+  connector account bind below.
+- **Local-data readiness.** Ownership check/clear/persist is local and does not wait for
+  PowerSync network connect. Until it finishes for the current account, the signed-in UI
+  does not mount the account task composer, so writes cannot land in a queue that is about
+  to be cleared or be classified as an unknown-owner queue on first sign-in.
+- **Uploads.** Each connector is bound to the account it was connected with. Before
+  `fetchCredentials` and each upload, `getSession()` must belong to that account; a
+  mismatch throws (no `complete()`), so a session change A→B mid-upload cannot POST the
+  previous queue under B's JWT (the API strips `user_id` and assigns ownership from the
+  token). Each PowerSync transaction is `POST ${origin}/sync/upload` with
   `{ transactionId, operations: [{ clientId, table, id, op, opData }] }`. The API origin
   is stripped of trailing slashes and joined with `URL` so `EXPO_PUBLIC_API_URL` values
   like `http://localhost:3000/` do not become `//sync/upload`. Do not
@@ -252,7 +264,8 @@ the token never reaches the UI or `AuthRepository`. Consequences:
   `disconnectAndClear`.
 - **UI.** Account-owned rows go through `TaskRepositories.forUser(userId)` (`tasks` +
   `user_id`). Sync status is `SyncStatusSource` from the repository layer; the UI never
-  imports `src/data/sync`. The UI keeps repository `subscribe()` + `useSyncExternalStore`;
+  imports `src/data/sync`. Local-data readiness is `isLocalDataReadyFor(userId)` on that
+  source. The UI keeps repository `subscribe()` + `useSyncExternalStore`;
   it does not use `@powersync/react`.
 
 ## Deferred

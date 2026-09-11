@@ -14,4 +14,9 @@ export interface SyncStatusSource {
   getStatus(): ClientSyncStatus;
   subscribe(listener: () => void): () => void;
   getUploadQueueStats(): Promise<{ count: number }>;
+  /**
+   * True once this account's local ownership check/clear has finished.
+   * Does not wait for PowerSync network connect.
+   */
+  isLocalDataReadyFor(userId: string): boolean;
 }

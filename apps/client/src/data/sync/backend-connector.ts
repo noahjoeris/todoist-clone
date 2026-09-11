@@ -11,12 +11,24 @@ export interface BackendConnectorOptions {
   auth: Pick<SupabaseClient['auth'], 'getSession'>;
   powersyncUrl: string;
   apiUrl: string;
+  /** Account whose upload queue this connector is allowed to post. */
+  expectedUserId: string;
   fetch?: typeof globalThis.fetch;
 }
+
+type ConnectorSession = {
+  access_token: string;
+  expires_at?: number | null;
+  user?: { id?: string } | null;
+};
 
 /**
  * Uploads local `tasks` writes to the Fastify API and vends the Supabase access token
  * as the PowerSync credential. Tokens stay in `src/data`; the UI never sees them.
+ *
+ * Each connector is bound to one account. A session for a different user is rejected
+ * so an in-flight `uploadData` loop cannot POST the previous queue under a new JWT
+ * (the API strips `user_id` and assigns ownership from the token).
  */
 export function createBackendConnector(
   options: BackendConnectorOptions,
@@ -30,6 +42,7 @@ export function createBackendConnector(
       if (error) throw error;
       const session = data.session;
       if (!session) return null;
+      assertExpectedAccount(session, options.expectedUserId);
 
       const credentials: PowerSyncCredentials = {
         endpoint: options.powersyncUrl,
@@ -45,7 +58,13 @@ export function createBackendConnector(
       for (;;) {
         const transaction = await database.getNextCrudTransaction();
         if (transaction == null) return;
-        await uploadTransaction(transaction, options.auth, fetchImpl, uploadUrl);
+        await uploadTransaction(
+          transaction,
+          options.auth,
+          fetchImpl,
+          uploadUrl,
+          options.expectedUserId,
+        );
       }
     },
   };
@@ -56,11 +75,14 @@ async function uploadTransaction(
   auth: BackendConnectorOptions['auth'],
   fetchImpl: typeof globalThis.fetch,
   uploadUrl: string,
+  expectedUserId: string,
 ): Promise<void> {
   const { data, error } = await auth.getSession();
   if (error) throw error;
-  const token = data.session?.access_token;
-  if (!token) throw new Error('PowerSync upload requires a session');
+  const session = data.session;
+  if (!session) throw new Error('PowerSync upload requires a session');
+  assertExpectedAccount(session, expectedUserId);
+  const token = session.access_token;
 
   let response: Response;
   try {
@@ -110,4 +132,10 @@ function toUploadOperation(entry: CrudEntry) {
     op: entry.op,
     opData: entry.opData,
   };
+}
+
+function assertExpectedAccount(session: ConnectorSession, expectedUserId: string): void {
+  if (session.user?.id !== expectedUserId) {
+    throw new Error('PowerSync session is for a different account');
+  }
 }

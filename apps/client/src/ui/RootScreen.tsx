@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { AuthRepository, SyncStatusSource, TaskRepositories } from '../data/repositories';
 import type { DataSystem } from '../data/system';
+import { canWriteAccountTasks } from './account-write-ready';
 import { useAuthState } from './hooks/useAuthState';
 import { AccountScreen } from './screens/AccountScreen';
 import { ConfirmEmailScreen } from './screens/ConfirmEmailScreen';
 import { HomeScreen } from './screens/HomeScreen';
-import { SessionRestoreFailedScreen, SessionRestoringScreen } from './screens/SessionRestoreScreen';
+import {
+  PreparingAccountScreen,
+  SessionRestoreFailedScreen,
+  SessionRestoringScreen,
+} from './screens/SessionRestoreScreen';
 import { SignInScreen } from './screens/SignInScreen';
 import { SignUpScreen } from './screens/SignUpScreen';
 
@@ -52,6 +57,7 @@ function AccountAwareScreen({
   const authState = useAuthState(auth);
   const [screen, setScreen] = useState<AuthScreen | null>(null);
   const signedInUserId = authState.status === 'signed-in' ? authState.user.id : null;
+  const localDataReady = useAccountLocalDataReady(sync, signedInUserId);
   const userTasks = useMemo(
     () => (signedInUserId == null ? null : tasks.forUser(signedInUserId)),
     [tasks, signedInUserId],
@@ -75,6 +81,7 @@ function AccountAwareScreen({
       );
     case 'signed-in':
       if (userTasks == null) return null;
+      if (!localDataReady) return <PreparingAccountScreen />;
       if (screen?.name === 'account') {
         return (
           <AccountScreen
@@ -142,4 +149,13 @@ function AccountAwareScreen({
         />
       );
   }
+}
+
+/** True only for the signed-in account whose ownership check/clear has finished. */
+function useAccountLocalDataReady(sync: SyncStatusSource, userId: string | null): boolean {
+  return useSyncExternalStore(
+    sync.subscribe,
+    () => canWriteAccountTasks(userId, sync),
+    () => canWriteAccountTasks(userId, sync),
+  );
 }

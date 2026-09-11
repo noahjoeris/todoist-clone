@@ -6,9 +6,18 @@ import { colors } from '../theme';
 
 /** Shown while the stored session is resolved, so guest tasks never flash before an account. */
 export function SessionRestoringScreen() {
+  return <FullScreenSpinner accessibilityLabel="Restoring your session" />;
+}
+
+/** Shown until local ownership check/clear finishes; account writes stay disabled. */
+export function PreparingAccountScreen() {
+  return <FullScreenSpinner accessibilityLabel="Preparing your tasks" />;
+}
+
+function FullScreenSpinner({ accessibilityLabel }: { accessibilityLabel: string }) {
   return (
     <View style={styles.loading}>
-      <ActivityIndicator accessibilityLabel="Restoring your session" color={colors.muted} />
+      <ActivityIndicator accessibilityLabel={accessibilityLabel} color={colors.muted} />
     </View>
   );
 }

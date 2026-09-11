@@ -10,12 +10,16 @@ const powersyncUrl = 'https://powersync.example';
 const apiUrl = 'http://localhost:3000';
 const uploadUrl = `${apiUrl}/sync/upload`;
 const accessToken = 'access-token';
+const expectedUserId = 'user-a';
 const TASK_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
-function session(overrides: { access_token?: string; expires_at?: number | null } = {}) {
+function session(
+  overrides: { access_token?: string; expires_at?: number | null; userId?: string } = {},
+) {
   return {
     access_token: overrides.access_token ?? accessToken,
     expires_at: overrides.expires_at === undefined ? 1_700_000_000 : overrides.expires_at,
+    user: { id: overrides.userId ?? expectedUserId },
   };
 }
 
@@ -70,6 +74,7 @@ describe('backend connector', () => {
     auth: createAuth(getSession),
     powersyncUrl,
     apiUrl,
+    expectedUserId,
     fetch,
   });
 
@@ -98,6 +103,16 @@ describe('backend connector', () => {
         error: new Error('session store unavailable'),
       });
       await expect(connector.fetchCredentials()).rejects.toThrow('session store unavailable');
+    });
+
+    it('throws when the session belongs to a different account', async () => {
+      getSession.mockResolvedValue({
+        data: { session: session({ userId: 'user-b' }) },
+        error: null,
+      });
+      await expect(connector.fetchCredentials()).rejects.toThrow(
+        'PowerSync session is for a different account',
+      );
     });
   });
 
@@ -208,6 +223,7 @@ describe('backend connector', () => {
         auth: createAuth(getSession),
         powersyncUrl,
         apiUrl: `${apiUrl}/`,
+        expectedUserId,
         fetch,
       });
       getSession.mockResolvedValue({ data: { session: session() }, error: null });
@@ -237,6 +253,25 @@ describe('backend connector', () => {
       await expect(
         connector.uploadData(database as unknown as CommonPowerSyncDatabase),
       ).rejects.toThrow('Failed to fetch');
+      expect(complete).not.toHaveBeenCalled();
+    });
+
+    it('rejects an upload when the session belongs to a different account', async () => {
+      getSession.mockResolvedValue({
+        data: { session: session({ userId: 'user-b' }) },
+        error: null,
+      });
+      const complete = vi.fn(async () => {});
+      const database = {
+        getNextCrudTransaction: vi
+          .fn<CommonPowerSyncDatabase['getNextCrudTransaction']>()
+          .mockResolvedValueOnce(crudTransaction({ complete })),
+      };
+
+      await expect(
+        connector.uploadData(database as unknown as CommonPowerSyncDatabase),
+      ).rejects.toThrow('PowerSync session is for a different account');
+      expect(fetch).not.toHaveBeenCalled();
       expect(complete).not.toHaveBeenCalled();
     });
   });

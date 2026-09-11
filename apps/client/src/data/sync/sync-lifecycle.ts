@@ -16,28 +16,70 @@ export interface SyncOwnerStore {
   set(userId: string | null): Promise<void>;
 }
 
+/**
+ * Which account has finished local ownership check/clear. Writes are safe for that
+ * user; PowerSync connect (network) is not required.
+ */
+export interface LocalDataReadiness {
+  userId(): string | null;
+  set(userId: string | null): void;
+  subscribe(listener: () => void): () => void;
+}
+
+export function createLocalDataReadiness(): LocalDataReadiness {
+  let readyUserId: string | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    userId() {
+      return readyUserId;
+    },
+    set(userId) {
+      if (readyUserId === userId) return;
+      readyUserId = userId;
+      for (const listener of listeners) listener();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
 type LifecycleDatabase = Pick<CommonPowerSyncDatabase, 'connect' | 'disconnectAndClear'> & {
   getUploadQueueStats(): Promise<{ count: number }>;
 };
 
 type SyncDatabase = Pick<
   CommonPowerSyncDatabase,
-  'connect' | 'disconnectAndClear' | 'currentStatus' | 'registerListener' | 'getUploadQueueStats'
->;
+  'connect' | 'disconnectAndClear' | 'registerListener'
+> & {
+  currentStatus: Pick<SyncStatus, 'connected' | 'connecting' | 'downloading' | 'uploading'>;
+  getUploadQueueStats(): Promise<{ count: number }>;
+};
 
 /**
  * Connects PowerSync while signed in and clears synced data on sign-out without
  * wiping `local_tasks`. Connect/clear never overlap. The queued-data owner is
  * persisted so a crash between force-sign-out and clear cannot upload the previous
  * account's queue under a later user's JWT.
+ *
+ * `lastUserId` is recorded only after persist-owner and connect succeed so a failed
+ * initialization stays retryable. Local-data readiness is set after the ownership
+ * check/clear/persist (network connect is not required) and cleared synchronously
+ * when the signed-in user changes so the UI cannot write into a queue that is about
+ * to be cleared.
  */
 export function startSyncLifecycle(
   powersync: LifecycleDatabase,
   auth: Pick<AuthRepository, 'getState' | 'subscribe'>,
-  connector: PowerSyncBackendConnector,
+  connectorFor: (userId: string) => PowerSyncBackendConnector,
   ownerStore: SyncOwnerStore,
+  localData: LocalDataReadiness = createLocalDataReadiness(),
 ): () => void {
   let lastUserId: string | null = null;
+  let sessionSeen = false;
   let queue = Promise.resolve();
 
   function enqueue(task: () => Promise<void>) {
@@ -46,37 +88,53 @@ export function startSyncLifecycle(
 
   async function onSignedIn(userId: string) {
     if (lastUserId === userId) return;
+    const previousUserId = lastUserId;
+    lastUserId = null;
 
-    const persistedOwner = await ownerStore.get();
-    if (
-      await queuedDataNeedsClear({
-        connectingUserId: userId,
-        lastUserId,
-        persistedOwner,
-        readQueueCount: () => powersync.getUploadQueueStats().then((stats) => stats.count),
-      })
-    ) {
-      await powersync.disconnectAndClear({ clearLocal: false });
+    try {
+      const persistedOwner = await ownerStore.get();
+      if (
+        await queuedDataNeedsClear({
+          connectingUserId: userId,
+          lastUserId: previousUserId,
+          persistedOwner,
+          readQueueCount: () => powersync.getUploadQueueStats().then((stats) => stats.count),
+        })
+      ) {
+        await powersync.disconnectAndClear({ clearLocal: false });
+      }
+
+      await ownerStore.set(userId);
+      localData.set(userId);
+      await powersync.connect(connectorFor(userId));
+      lastUserId = userId;
+    } catch (error) {
+      console.error('PowerSync signed-in connect failed', error);
     }
-
-    lastUserId = userId;
-    await ownerStore.set(userId);
-    await powersync.connect(connector);
   }
 
   async function onSignedOut() {
-    if (lastUserId == null) return;
-    lastUserId = null;
-    await powersync.disconnectAndClear({ clearLocal: false });
-    await ownerStore.set(null);
+    if (!sessionSeen) return;
+    try {
+      await powersync.disconnectAndClear({ clearLocal: false });
+      await ownerStore.set(null);
+      lastUserId = null;
+      if (auth.getState().status !== 'signed-in') sessionSeen = false;
+    } catch (error) {
+      console.error('PowerSync signed-out clear failed', error);
+    }
   }
 
   function handle(state: AuthState) {
     switch (state.status) {
       case 'signed-in':
+        if (localData.userId() !== state.user.id) localData.set(null);
+        sessionSeen = true;
         enqueue(() => onSignedIn(state.user.id));
         return;
       case 'signed-out':
+        localData.set(null);
+        if (!sessionSeen) return;
         enqueue(() => onSignedOut());
         return;
       default:
@@ -129,15 +187,26 @@ async function queuedDataNeedsClear(input: {
   });
 }
 
-export function createSyncStatusSource(powersync: SyncDatabase): SyncStatusSource {
+export function createSyncStatusSource(
+  powersync: SyncDatabase,
+  localData: LocalDataReadiness,
+): SyncStatusSource {
   return {
     getStatus() {
       return toClientSyncStatus(powersync.currentStatus);
     },
+    isLocalDataReadyFor(userId) {
+      return localData.userId() === userId;
+    },
     subscribe(listener) {
-      return powersync.registerListener({
+      const stopStatus = powersync.registerListener({
         statusChanged: () => listener(),
       });
+      const stopReady = localData.subscribe(listener);
+      return () => {
+        stopStatus();
+        stopReady();
+      };
     },
     async getUploadQueueStats() {
       const stats = await powersync.getUploadQueueStats();
@@ -146,7 +215,9 @@ export function createSyncStatusSource(powersync: SyncDatabase): SyncStatusSourc
   };
 }
 
-function toClientSyncStatus(status: SyncStatus): ClientSyncStatus {
+function toClientSyncStatus(
+  status: Pick<SyncStatus, 'connected' | 'connecting' | 'downloading' | 'uploading'>,
+): ClientSyncStatus {
   return {
     connected: status.connected,
     connecting: status.connecting,
