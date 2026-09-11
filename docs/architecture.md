@@ -151,12 +151,16 @@ Supabase Cloud only allows editing the email template with custom SMTP.) Consequ
   publishable key, PowerSync URL, API URL). All unset means guest-only mode; a partial or
   malformed set is reported inside the app while guest tasks keep working.
 - **Platform options (extends ADR-007).** `auth-platform.native.ts` supplies AsyncStorage and
-  leaves URL session detection off (no deep link yet; after confirming in the browser the user
-  signs in with their password). `auth-platform.web.ts` keeps supabase-js on `localStorage`
-  and enables `detectSessionInUrl`, so the confirmation redirect to the Site URL signs the
-  user in. `auth-lifecycle.native.ts` starts/stops token auto-refresh from `AppState`; the web
-  variant is a no-op because supabase-js already reacts to `visibilitychange`. The deprecated
-  `lock` option is not used.
+  leaves URL session detection off (`detectSessionInUrl: false`): there is no `window.location`
+  on native, so confirmation is completed by `auth-deep-link.native.ts` (`Linking` +
+  `exchangeCodeForSession` / `setSession`) after `signUp` / `resend` pass
+  `emailRedirectTo: 'todoist-clone://auth/callback'`. The resulting session is applied in
+  `AuthRepository` and rides the existing auth-state / PowerSync lifecycle (ADR-015).
+  `auth-platform.web.ts` keeps supabase-js on `localStorage` and enables `detectSessionInUrl`,
+  so the confirmation redirect to the Site URL signs the user in; web does not pass
+  `emailRedirectTo`. `auth-lifecycle.native.ts` starts/stops token auto-refresh from
+  `AppState`; the web variant is a no-op because supabase-js already reacts to
+  `visibilitychange`. The deprecated `lock` option is not used.
 - **Startup.** The root screen renders nothing until the stored session is resolved, so guest
   tasks never flash before an account view. A failed restoration (typically offline with an
   expired token) offers retry or an explicit "continue as guest"; after that choice, late

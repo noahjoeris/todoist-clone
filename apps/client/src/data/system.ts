@@ -9,7 +9,9 @@ import {
   type SyncStatusSource,
   type TaskRepositories,
 } from './repositories';
+import { registerAuthDeepLink } from './supabase/auth-deep-link';
 import { registerAuthLifecycle } from './supabase/auth-lifecycle';
+import { authPlatformOptions } from './supabase/auth-platform';
 import { createSupabaseClient } from './supabase/client';
 import { createBackendConnector } from './sync/backend-connector';
 import {
@@ -69,7 +71,11 @@ function createCloudServices(powersync: CommonPowerSyncDatabase): {
       return { auth: { status: 'misconfigured', error: cloudEnv.error }, dispose() {} };
     case 'configured': {
       const supabase = createSupabaseClient(cloudEnv.env);
-      const repository = createAuthRepository(supabase.auth, registerAuthLifecycle);
+      const { emailRedirectTo } = authPlatformOptions;
+      const repository = createAuthRepository(supabase.auth, registerAuthLifecycle, {
+        registerDeepLink: registerAuthDeepLink,
+        ...(emailRedirectTo !== undefined ? { emailRedirectTo } : {}),
+      });
       const localData = createLocalDataReadiness();
       const stopSync = startSyncLifecycle(
         powersync,

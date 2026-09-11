@@ -8,7 +8,8 @@ import { authPlatformOptions } from './auth-platform';
  *
  * Sessions persist across restarts and tokens refresh automatically; `registerAuthLifecycle`
  * pauses refresh while a native app is backgrounded. Email confirmation happens through the
- * link in Supabase's default email; the web app picks the resulting session up from the URL.
+ * link in Supabase's default email. Web picks the session up from the Site URL fragment;
+ * native exchanges `todoist-clone://auth/callback` for a session.
  */
 export function createSupabaseClient(
   env: Pick<CloudEnv, 'supabaseUrl' | 'supabasePublishableKey'>,

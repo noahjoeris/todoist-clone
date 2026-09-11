@@ -14,8 +14,8 @@ interface ConfirmEmailScreenProps {
 
 /**
  * Shown after sign-up (or after signing in with an unconfirmed email). Confirmation happens
- * through the link in the email; on web the link brings the session back into this app, on
- * native the user returns and signs in with their password.
+ * through the link in the email: web consumes the Site URL fragment; native opens
+ * `todoist-clone://auth/callback` and signs the user in. Sign-in remains as a fallback.
  */
 export function ConfirmEmailScreen({ auth, email, onSignIn }: ConfirmEmailScreenProps) {
   const [resent, setResent] = useState(false);
@@ -31,7 +31,7 @@ export function ConfirmEmailScreen({ auth, email, onSignIn }: ConfirmEmailScreen
   return (
     <FormScreen
       title="Check your email"
-      description={`We sent a confirmation link to ${email}. Open it to activate your account, then sign in.`}
+      description={`We sent a confirmation link to ${email}. Open it to activate your account.`}
     >
       {error && <FormError message={error.message} />}
       {resent && !error && <Text style={styles.notice}>New link sent.</Text>}

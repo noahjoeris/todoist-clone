@@ -12,6 +12,8 @@ export interface AuthPlatformOptions {
   storage?: SupportedStorage;
   /** Whether to pick up a session from the page URL after an email confirmation redirect. */
   detectSessionInUrl: boolean;
+  /** Native confirmation emails redirect here. Omitted on web (Site URL + `detectSessionInUrl`). */
+  emailRedirectTo?: string;
 }
 
 export const authPlatformOptions: AuthPlatformOptions = {

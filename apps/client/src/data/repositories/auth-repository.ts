@@ -1,4 +1,6 @@
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
+import { createSessionFromAuthUrl } from '../supabase/auth-callback';
+import type { RegisterAuthDeepLink } from '../supabase/auth-deep-link';
 import {
   AuthFailure,
   type AuthState,
@@ -40,14 +42,24 @@ export type AuthClient = Pick<
   | 'signOut'
   | 'startAutoRefresh'
   | 'stopAutoRefresh'
+  | 'exchangeCodeForSession'
+  | 'setSession'
 >;
 
 /** Platform hook for pausing token refresh in the background; returns a cleanup function. */
 export type RegisterLifecycle = (auth: AuthClient) => () => void;
 
+export interface AuthRepositoryOptions {
+  /** Native confirmation emails redirect here. Omitted on web so the Site URL is used. */
+  emailRedirectTo?: string;
+  /** Native `Linking` listener; web is a no-op. */
+  registerDeepLink?: RegisterAuthDeepLink;
+}
+
 export function createAuthRepository(
   auth: AuthClient,
   registerLifecycle: RegisterLifecycle,
+  options: AuthRepositoryOptions = {},
 ): AuthRepository {
   let state: AuthState = { status: 'restoring' };
   const listeners = new Set<(state: AuthState) => void>();
@@ -81,6 +93,21 @@ export function createAuthRepository(
     applySession(session);
   });
   const unregisterLifecycle = registerLifecycle(auth);
+
+  async function applySessionFromUrl(url: string): Promise<void> {
+    const session = await createSessionFromAuthUrl(auth, url);
+    if (!session) return;
+    // Invalidate an in-flight restore so a stale getSession(null) cannot overwrite this.
+    restorationGeneration += 1;
+    applySession(session);
+  }
+
+  const unregisterDeepLink =
+    options.registerDeepLink?.((url) =>
+      applySessionFromUrl(url).catch((error: unknown) => {
+        console.error('Failed to apply auth session from deep link', error);
+      }),
+    ) ?? (() => {});
 
   function clearGuestOverride() {
     guestOverride = false;
@@ -125,7 +152,11 @@ export function createAuthRepository(
     async signUp(input) {
       try {
         const { email, password } = credentialsSchema.parse(input);
-        const { data, error } = await auth.signUp({ email, password });
+        const { data, error } = await auth.signUp({
+          email,
+          password,
+          ...emailRedirectOptions(options.emailRedirectTo),
+        });
         if (error) throw error;
         // With confirmations on, Supabase answers an existing email with an obfuscated user
         // that has no identities instead of an error. Telling them to check their inbox would strand them.
@@ -152,7 +183,11 @@ export function createAuthRepository(
     },
 
     async resendConfirmation(email) {
-      const { error } = await auth.resend({ type: 'signup', email });
+      const { error } = await auth.resend({
+        type: 'signup',
+        email,
+        ...emailRedirectOptions(options.emailRedirectTo),
+      });
       if (error) throw toAuthFailure(error);
     },
 
@@ -169,9 +204,16 @@ export function createAuthRepository(
     dispose() {
       authListener.subscription.unsubscribe();
       unregisterLifecycle();
+      unregisterDeepLink();
       listeners.clear();
     },
   };
+}
+
+function emailRedirectOptions(
+  emailRedirectTo: string | undefined,
+): { options: { emailRedirectTo: string } } | Record<string, never> {
+  return emailRedirectTo !== undefined ? { options: { emailRedirectTo } } : {};
 }
 
 function toAuthUser(session: Session): AuthUser {
