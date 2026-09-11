@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import type { AuthRepository, TaskRepository } from '../data/repositories';
+import { useEffect, useMemo, useState } from 'react';
+import type { AuthRepository, TaskRepositories } from '../data/repositories';
+import type { SyncStatusSource } from '../data/sync/sync-lifecycle';
 import type { DataSystem } from '../data/system';
 import { useAuthState } from './hooks/useAuthState';
 import { AccountScreen } from './screens/AccountScreen';
@@ -10,34 +11,56 @@ import { SignInScreen } from './screens/SignInScreen';
 import { SignUpScreen } from './screens/SignUpScreen';
 
 /**
- * Chooses between guest and account content. Without Supabase configuration the app is
+ * Chooses between guest and account content. Without cloud configuration the app is
  * guest-only; otherwise nothing renders until the stored session is resolved.
  */
 export function RootScreen({ system }: { system: DataSystem }) {
   switch (system.auth.status) {
     case 'unconfigured':
-      return <HomeScreen repository={system.tasks} account={{ kind: 'hidden' }} />;
+      return <HomeScreen repository={system.tasks.guest} account={{ kind: 'hidden' }} />;
     case 'misconfigured':
       return (
         <HomeScreen
-          repository={system.tasks}
+          repository={system.tasks.guest}
           account={{ kind: 'unavailable', message: system.auth.error.message }}
         />
       );
-    case 'available':
-      return <AccountAwareScreen tasks={system.tasks} auth={system.auth.repository} />;
+    case 'available': {
+      const sync = system.sync;
+      if (sync == null) {
+        throw new Error('Cloud auth is available without a sync status source');
+      }
+      return <AccountAwareScreen tasks={system.tasks} auth={system.auth.repository} sync={sync} />;
+    }
   }
 }
 
-type AuthScreen = { name: 'sign-in' } | { name: 'sign-up' } | { name: 'confirm'; email: string };
+type AuthScreen =
+  | { name: 'sign-in' }
+  | { name: 'sign-up' }
+  | { name: 'confirm'; email: string }
+  | { name: 'account' };
 
-function AccountAwareScreen({ tasks, auth }: { tasks: TaskRepository; auth: AuthRepository }) {
+function AccountAwareScreen({
+  tasks,
+  auth,
+  sync,
+}: {
+  tasks: TaskRepositories;
+  auth: AuthRepository;
+  sync: SyncStatusSource;
+}) {
   const authState = useAuthState(auth);
   const [screen, setScreen] = useState<AuthScreen | null>(null);
+  const signedInUserId = authState.status === 'signed-in' ? authState.user.id : null;
+  const userTasks = useMemo(
+    () => (signedInUserId == null ? null : tasks.forUser(signedInUserId)),
+    [tasks, signedInUserId],
+  );
 
-  // Any successful sign-in (from whichever screen) returns to the account view.
+  // Successful sign-in returns to the account task list; sign-out leaves the account sub-screen.
   useEffect(() => {
-    if (authState.status === 'signed-in') setScreen(null);
+    if (authState.status === 'signed-in' || authState.status === 'signed-out') setScreen(null);
   }, [authState.status]);
 
   switch (authState.status) {
@@ -52,8 +75,28 @@ function AccountAwareScreen({ tasks, auth }: { tasks: TaskRepository; auth: Auth
         />
       );
     case 'signed-in':
-      // Guest list and composer are unmounted here; their rows stay untouched in `local_tasks`.
-      return <AccountScreen auth={auth} user={authState.user} />;
+      if (userTasks == null) return null;
+      if (screen?.name === 'account') {
+        return (
+          <AccountScreen
+            auth={auth}
+            user={authState.user}
+            onBack={() => setScreen(null)}
+            sync={sync}
+          />
+        );
+      }
+      return (
+        <HomeScreen
+          repository={userTasks}
+          account={{
+            kind: 'account',
+            label: authState.user.email ?? 'Account',
+            onPress: () => setScreen({ name: 'account' }),
+          }}
+          sync={sync}
+        />
+      );
     case 'signed-out':
       break;
   }
@@ -62,7 +105,7 @@ function AccountAwareScreen({ tasks, auth }: { tasks: TaskRepository; auth: Auth
     case undefined:
       return (
         <HomeScreen
-          repository={tasks}
+          repository={tasks.guest}
           account={{ kind: 'sign-in', onPress: () => setScreen({ name: 'sign-in' }) }}
         />
       );
@@ -90,6 +133,13 @@ function AccountAwareScreen({ tasks, auth }: { tasks: TaskRepository; auth: Auth
           auth={auth}
           email={screen.email}
           onSignIn={() => setScreen({ name: 'sign-in' })}
+        />
+      );
+    case 'account':
+      return (
+        <HomeScreen
+          repository={tasks.guest}
+          account={{ kind: 'sign-in', onPress: () => setScreen({ name: 'sign-in' }) }}
         />
       );
   }

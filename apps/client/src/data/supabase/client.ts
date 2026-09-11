@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { SupabaseEnv } from '../../config/env';
+import type { CloudEnv } from '../../config/env';
 import { authPlatformOptions } from './auth-platform';
 
 /**
@@ -10,7 +10,9 @@ import { authPlatformOptions } from './auth-platform';
  * pauses refresh while a native app is backgrounded. Email confirmation happens through the
  * link in Supabase's default email; the web app picks the resulting session up from the URL.
  */
-export function createSupabaseClient(env: SupabaseEnv): SupabaseClient {
+export function createSupabaseClient(
+  env: Pick<CloudEnv, 'supabaseUrl' | 'supabasePublishableKey'>,
+): SupabaseClient {
   const { storage, detectSessionInUrl } = authPlatformOptions;
   return createClient(env.supabaseUrl, env.supabasePublishableKey, {
     auth: {
