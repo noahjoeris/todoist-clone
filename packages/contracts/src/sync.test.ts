@@ -83,6 +83,15 @@ describe('taskColumnsSchema', () => {
     );
   });
 
+  it.each(['2026-09-11 15:00:00.000Z', '2026-09-11 15:00:00.000000Z'] as const)(
+    'accepts PowerSync space-separated created_at %s',
+    (created_at) => {
+      expect(taskColumnsSchema.parse({ ...validPutData, created_at }).created_at).toBe(
+        created_at.replace(' ', 'T'),
+      );
+    },
+  );
+
   it('accepts a completed_at timestamp', () => {
     expect(
       taskColumnsSchema.parse({
@@ -91,6 +100,15 @@ describe('taskColumnsSchema', () => {
       }).completed_at,
     ).toBe('2026-09-11T15:00:00.000Z');
   });
+
+  it.each(['2026-09-11 15:00:00.000Z', '2026-09-11 15:00:00.000000Z'] as const)(
+    'accepts PowerSync space-separated completed_at %s',
+    (completed_at) => {
+      expect(taskColumnsSchema.parse({ ...validPutData, completed_at }).completed_at).toBe(
+        completed_at.replace(' ', 'T'),
+      );
+    },
+  );
 
   it('accepts explicit null completed_at (active)', () => {
     expect(
@@ -144,6 +162,24 @@ describe('taskPatchColumnsSchema', () => {
       completed_at: '2026-09-11T15:00:00.000Z',
     });
   });
+
+  it.each(['2026-09-11 15:00:00.000Z', '2026-09-11 15:00:00.000000Z'] as const)(
+    'accepts PowerSync space-separated created_at %s',
+    (created_at) => {
+      expect(taskPatchColumnsSchema.parse({ created_at }).created_at).toBe(
+        created_at.replace(' ', 'T'),
+      );
+    },
+  );
+
+  it.each(['2026-09-11 15:00:00.000Z', '2026-09-11 15:00:00.000000Z'] as const)(
+    'accepts PowerSync space-separated completed_at %s',
+    (completed_at) => {
+      expect(taskPatchColumnsSchema.parse({ completed_at }).completed_at).toBe(
+        completed_at.replace(' ', 'T'),
+      );
+    },
+  );
 
   it('accepts explicit null completed_at (reopen)', () => {
     expect(taskPatchColumnsSchema.parse({ completed_at: null })).toEqual({ completed_at: null });

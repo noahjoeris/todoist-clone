@@ -230,6 +230,11 @@ to `POST /sync/upload`. The API applies a batch atomically in one Drizzle transa
   (same id, fields, `created_at`, and `completed_at`). The API applies the batch
   in order, atomically; a retry of DELETE → PUT is idempotent (missing DELETE is
   a no-op, PUT upserts).
+- PowerSync maps Postgres `timestamptz` to on-disk SQLite text as
+  `YYYY-MM-DD hh:mm:ss.sssZ` (space separator, not `T`). The upload contract
+  accepts that form on `created_at` and `completed_at` (PUT and PATCH) by
+  normalizing it to RFC 3339. The client applies the same normalization in
+  `mapTaskRow` so delete snapshots and restore PUTs are wire-valid.
 - Any 403 rolls back the whole batch, including earlier PUTs in that request.
 - **Connector:** 2xx → `complete()` the PowerSync transaction. 400/403 → log the body and
   `complete()` (client bug or abuse; the SQLite batch is discarded). **401 throws** so

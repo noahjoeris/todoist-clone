@@ -315,8 +315,8 @@ function mapTaskRow(row: TaskRow): Task {
     priority: row.priority,
     scheduledDate: row.scheduledDate,
     scheduledTime: normalizeScheduledTime(row.scheduledTime),
-    completedAt: row.completedAt,
-    createdAt: row.createdAt,
+    completedAt: row.completedAt == null ? null : normalizeTimestamptz(row.completedAt),
+    createdAt: normalizeTimestamptz(row.createdAt),
   };
 }
 
@@ -324,4 +324,12 @@ function mapTaskRow(row: TaskRow): Task {
 function normalizeScheduledTime(value: string | null): string | null {
   if (value == null) return null;
   return value.slice(0, 5);
+}
+
+/**
+ * PowerSync maps Postgres timestamptz to SQLite text as `YYYY-MM-DD hh:mm:ss.sssZ`
+ * (space separator). Restore PUT needs RFC 3339 with `T`.
+ */
+function normalizeTimestamptz(value: string): string {
+  return value.replace(/^(\d{4}-\d{2}-\d{2}) (\d)/, '$1T$2');
 }

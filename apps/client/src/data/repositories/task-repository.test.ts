@@ -477,6 +477,58 @@ describe('account-owned task repository', () => {
     ]);
   });
 
+  it('maps PowerSync space-separated timestamptz to RFC 3339 so restore PUT is wire-valid', async () => {
+    const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    sqlite
+      .prepare(
+        `INSERT INTO tasks
+        (id, user_id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        USER_A,
+        'Synced',
+        '',
+        4,
+        null,
+        null,
+        '2026-09-11 15:00:00.000Z',
+        '2026-09-10 12:00:00.000000Z',
+        '2026-09-11 15:00:00.000Z',
+      );
+
+    watch.mockImplementation((sql, parameters, callback) => {
+      const array = sqlite.prepare(sql).all(...(parameters ?? []));
+      callback?.onResult({
+        array,
+        *[Symbol.iterator]() {
+          yield* array;
+          return undefined;
+        },
+      });
+    });
+
+    const onTasks = vi.fn();
+    repositories.forUser(USER_A).subscribe(onTasks, vi.fn());
+    expect(onTasks.mock.calls[0]?.[0]).toEqual([
+      {
+        id,
+        title: 'Synced',
+        description: '',
+        priority: 4,
+        scheduledDate: null,
+        scheduledTime: null,
+        completedAt: '2026-09-11T15:00:00.000Z',
+        createdAt: '2026-09-10T12:00:00.000000Z',
+      },
+    ]);
+
+    const snapshot = await repositories.forUser(USER_A).delete(id);
+    expect(snapshot.completedAt).toBe('2026-09-11T15:00:00.000Z');
+    expect(snapshot.createdAt).toBe('2026-09-10T12:00:00.000000Z');
+  });
+
   it('scopes update, complete, delete, and restore to the owner', async () => {
     await repositories.forUser(USER_A).create({ title: 'Mine' });
     const id = loadId(sqlite, 'tasks');

@@ -365,6 +365,35 @@ describe('POST /sync/upload (integration)', () => {
     expect(afterRetry?.createdAt).toBe('2026-09-10T12:00:00.000Z');
   });
 
+  it('PUT restore accepts PowerSync space-separated created_at and completed_at', async () => {
+    await upload(OWNER_ID, [putOp(OWN_ID, { title: 'Original' })]);
+
+    const createdAt = '2026-09-10 12:00:00.000Z';
+    const completedAt = '2026-09-11 15:00:00.000000Z';
+    const response = await upload(OWNER_ID, [
+      { clientId: 2, op: 'DELETE', table: 'tasks', id: OWN_ID, opData: null },
+      putOp(
+        OWN_ID,
+        {
+          title: 'Original',
+          completed_at: completedAt,
+          created_at: createdAt,
+        },
+        3,
+      ),
+    ]);
+    expect(response.statusCode).toBe(200);
+
+    const row = await loadTask(OWN_ID);
+    if (!row) throw new Error('expected row');
+    expect(row.title).toBe('Original');
+    expect(new Date(row.createdAt).getTime()).toBe(new Date('2026-09-10T12:00:00.000Z').getTime());
+    if (row.completedAt == null) throw new Error('expected completed_at');
+    expect(new Date(row.completedAt).getTime()).toBe(
+      new Date('2026-09-11T15:00:00.000Z').getTime(),
+    );
+  });
+
   it("PUT restore of another user's id returns 403 and leaves the row unchanged", async () => {
     await upload(OTHER_ID, [putOp(OTHER_TASK_ID, { title: 'Other' })]);
 
