@@ -7,6 +7,7 @@ import { authPlugin, supabaseJwksUrl } from './plugins/auth.js';
 import { databasePlugin } from './plugins/database.js';
 import { healthRoutes } from './routes/health.js';
 import { meRoutes } from './routes/me.js';
+import { syncRoutes } from './routes/sync.js';
 
 export interface BuildAppOptions {
   env: Env;
@@ -41,6 +42,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   await app.register(healthRoutes, { version: options.version });
   await app.register(meRoutes);
+  await app.register(syncRoutes);
 
   return app;
 }

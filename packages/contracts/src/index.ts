@@ -7,3 +7,19 @@
  */
 export { type HealthResponse, healthResponseSchema } from './health.js';
 export { type MeResponse, meResponseSchema } from './me.js';
+export {
+  type CrudEntry,
+  crudEntrySchema,
+  mergeScheduledColumns,
+  type ScheduledColumns,
+  type TaskColumns,
+  type TaskPatchColumns,
+  taskColumnsSchema,
+  taskPatchColumnsSchema,
+  type UploadError,
+  type UploadRequest,
+  type UploadResponse,
+  uploadErrorSchema,
+  uploadRequestSchema,
+  uploadResponseSchema,
+} from './sync.js';

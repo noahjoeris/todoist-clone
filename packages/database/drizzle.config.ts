@@ -1,10 +1,13 @@
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'drizzle-kit';
 
 // drizzle-kit does not load env files. Read the repo-root .env when present so
 // `pnpm db:migrate` works locally; CI and containers set env vars directly.
-const rootEnvFile = resolve(import.meta.dirname, '../../.env');
+// `import.meta.dirname` is missing when drizzle-kit bundles this config.
+const configDir = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
+const rootEnvFile = resolve(configDir, '../../.env');
 if (existsSync(rootEnvFile)) {
   process.loadEnvFile(rootEnvFile);
 }

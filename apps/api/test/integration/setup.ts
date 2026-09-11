@@ -1,0 +1,129 @@
+import {
+  createDatabaseConnection,
+  type DatabaseConnection,
+  eq,
+  schema,
+  sql,
+} from '@todoist-clone/database';
+import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
+import {
+  type CryptoKey,
+  createLocalJWKSet,
+  exportJWK,
+  generateKeyPair,
+  type JWTVerifyGetKey,
+  SignJWT,
+} from 'jose';
+import { afterAll, beforeAll, beforeEach } from 'vitest';
+import { buildApp } from '../../src/app.js';
+import { loadEnv } from '../../src/config/env.js';
+
+export const OWNER_ID = '11111111-1111-4111-8111-111111111111';
+export const OTHER_ID = '22222222-2222-4222-8222-222222222222';
+
+const CREATED_AT = '2026-09-11T12:00:00.000Z';
+
+export function putOp(
+  id: string,
+  opData: Record<string, unknown> = {},
+  clientId = 1,
+): {
+  clientId: number;
+  op: 'PUT';
+  table: 'tasks';
+  id: string;
+  opData: Record<string, unknown>;
+} {
+  return {
+    clientId,
+    op: 'PUT',
+    table: 'tasks',
+    id,
+    opData: {
+      title: 'Task',
+      description: '',
+      priority: 4,
+      scheduled_date: null,
+      scheduled_time: null,
+      created_at: CREATED_AT,
+      ...opData,
+    },
+  };
+}
+
+export let app: FastifyInstance;
+export let database: DatabaseConnection;
+
+let privateKey: CryptoKey;
+let getKey: JWTVerifyGetKey;
+
+export async function sign(subject: string): Promise<string> {
+  return new SignJWT({})
+    .setProtectedHeader({ alg: 'ES256', kid: 'key-1' })
+    .setAudience('authenticated')
+    .setIssuedAt()
+    .setExpirationTime('5m')
+    .setSubject(subject)
+    .sign(privateKey);
+}
+
+export async function upload(
+  subject: string,
+  operations: unknown[],
+  transactionId?: number,
+): Promise<LightMyRequestResponse> {
+  return app.inject({
+    method: 'POST',
+    url: '/sync/upload',
+    headers: { authorization: `Bearer ${await sign(subject)}` },
+    payload: transactionId === undefined ? { operations } : { transactionId, operations },
+  });
+}
+
+export async function loadTask(id: string) {
+  const [row] = await database.db.select().from(schema.tasks).where(eq(schema.tasks.id, id));
+  return row ?? null;
+}
+
+beforeAll(async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is required for API integration tests');
+  }
+
+  const key = await generateKeyPair('ES256', { extractable: true });
+  privateKey = key.privateKey;
+  const jwk = await exportJWK(key.publicKey);
+  jwk.kid = 'key-1';
+  getKey = createLocalJWKSet({ keys: [jwk] });
+
+  database = createDatabaseConnection({ url: databaseUrl, maxConnections: 4 });
+
+  await database.db.execute(sql`SET session_replication_role = replica`);
+  await database.db.execute(
+    sql`INSERT INTO auth.users (id) VALUES (${OWNER_ID}::uuid), (${OTHER_ID}::uuid) ON CONFLICT (id) DO NOTHING`,
+  );
+  await database.db.execute(sql`SET session_replication_role = DEFAULT`);
+
+  app = await buildApp({
+    env: loadEnv({
+      NODE_ENV: 'test',
+      DATABASE_URL: databaseUrl,
+      SUPABASE_URL: process.env.SUPABASE_URL ?? 'https://example.supabase.co',
+      SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY ?? 'sb_secret_test',
+    }),
+    version: '0.0.0',
+    logger: false,
+    database,
+    getKey,
+  });
+  await app.ready();
+});
+
+beforeEach(async () => {
+  await database.db.execute(sql`TRUNCATE public.tasks`);
+});
+
+afterAll(async () => {
+  if (app) await app.close();
+});

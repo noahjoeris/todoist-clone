@@ -21,6 +21,7 @@ jobs:
       client: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.client }}
       api_image: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.api_image }}
       compose: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.compose }}
+      integration: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.integration }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -57,6 +58,19 @@ jobs:
               - 'compose.local.yaml'
               - '.env.example'
               - 'infra/**'
+              - '.github/workflows/ci.yml'
+            integration:
+              - 'apps/api/**'
+              - 'packages/contracts/**'
+              - 'packages/database/**'
+              - 'infra/powersync/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.npmrc'
+              - '.nvmrc'
+              - 'tsconfig.base.json'
+              - 'tsconfig.node.json'
               - '.github/workflows/ci.yml'
 
   checks:
@@ -141,3 +155,44 @@ jobs:
           done
           docker logs api
           exit 1
+
+  integration:
+    name: API integration
+    needs: changes
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: supabase/postgres:17.6.1.136
+        env:
+          POSTGRES_PASSWORD: postgres
+          JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -h localhost"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      DATABASE_MIGRATION_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @todoist-clone/api... build
+      - name: Install psql
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Bootstrap publication and migrate
+        run: |
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -v powersync_password=ci -f infra/powersync/bootstrap-source-db.sql
+          pnpm db:migrate
+      - run: pnpm --filter @todoist-clone/api test:integration

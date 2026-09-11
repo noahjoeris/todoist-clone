@@ -112,7 +112,10 @@ the same artifacts; `pnpm build` is required after cloning.
 ### ADR-010 Testing policy
 
 Unit tests for business logic; targeted integration tests for authorization and PowerSync
-upload handling; no end-to-end suite. Basic CI runs without cloud credentials.
+upload handling; no end-to-end suite. Basic CI (`checks`) runs without cloud credentials
+or a database. The `integration` job starts `supabase/postgres:17.6.1.136`, bootstraps
+the empty `powersync` publication, migrates, and runs `apps/api` integration tests. Still
+no cloud credentials.
 
 ### ADR-011 Guest tasks use a local-only PowerSync table
 
@@ -129,6 +132,9 @@ When auth and sync arrive, explicitly adopt guest tasks into an account-owned sy
 preserving IDs and copying successfully before removing local originals. Do not turn this
 guest table into a synced table in place or upload ownerless rows. Cloud adapters remain
 available but are not instantiated by the local-only composition root.
+
+Account-owned rows live in `public.tasks` (ADR-014). Adoption copies `local_tasks` into
+that table in a later change; it does not convert `local_tasks` in place.
 
 ### ADR-012 Supabase Auth behind an `AuthRepository`; guest tasks hidden while signed in
 
@@ -187,8 +193,36 @@ refetches on an unknown kid (30s cooldown). Consequences:
   `include`s it). `pnpm infra:up` interpolates `infra/supabase/.env` then the
   repo-root `.env`.
 
+### ADR-014 PowerSync upload contract for `tasks`
+
+The first synced table is `public.tasks`. Clients will upload PowerSync `CrudEntry` batches
+to `POST /sync/upload`. The API applies a batch atomically in one Drizzle transaction.
+
+- **Wire schema** lives in `packages/contracts` (`uploadRequestSchema`). Extra keys
+  including `id`, `user_id` and `updated_at` are stripped (`.strip()`, not `.strict()`).
+  The server always sets `user_id` from the JWT and `updated_at = now()`.
+- **PUT** is an owner-guarded upsert: `INSERT … ON CONFLICT (id) DO UPDATE … WHERE
+  user_id = jwt`. Zero rows affected means the id belongs to someone else → 403.
+- **PATCH / DELETE** of a missing row is a no-op (still 200, `applied = operations.length`).
+  PATCH/DELETE of another user's row is 403. A PATCH whose only keys were server-owned
+  is a no-op after strip.
+- PATCH `scheduled_date` / `scheduled_time` is validated against the merged persisted
+  row, not the partial payload. Clearing the date also clears a leftover time. A
+  time-only patch on a dated row is allowed. An explicit time without a date is
+  400 `invalid-request`.
+- Any 403 rolls back the whole batch, including earlier PUTs in that request.
+- **Connector (next PR):** 2xx / 4xx → `complete()` the PowerSync transaction (4xx is a
+  client bug or abuse; the SQLite batch is discarded). 5xx / network → retry.
+- **RLS** is enabled with no policies (deny-all for PostgREST roles). The table owner
+  (API / `postgres`) bypasses RLS; there is no FORCE. The FK
+  `tasks.user_id → auth.users(id) ON DELETE CASCADE` is raw SQL so drizzle-kit never
+  models `auth` (ADR-004). Referencing `auth` is not modifying it.
+- `scheduled_time` is stored as `time(0)` (`HH:mm:ss`). The wire also accepts `HH:mm`.
+- Client PowerSync schema includes `tasks` (mirrors `public.tasks` / `user_tasks`).
+  The backend connector is still deferred. Guest-task adoption stays as ADR-011.
+
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,
 different command), attachments/Storage, password recovery and social login, guest-task
-adoption, the PowerSync backend connector and first synced table.
+adoption, the PowerSync backend connector.

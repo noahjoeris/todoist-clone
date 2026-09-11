@@ -45,11 +45,14 @@ Fill both env files. Two ways to provide the backing services:
 1. Create a Supabase project. Copy URL, publishable key, secret key, pooler + direct DB URLs into the env files.
    For authentication only, the client needs just `EXPO_PUBLIC_SUPABASE_URL` and
    `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; see [Authentication setup](#authentication-setup).
-2. Prepare the database for PowerSync (replication role + empty `powersync` publication):
+2. Prepare the database for PowerSync (replication role + empty `powersync` publication),
+   then apply Drizzle migrations (creates `public.tasks` and adds it to the publication):
    `psql "<direct connection string>" -v powersync_password='...' -f infra/powersync/bootstrap-source-db.sql`
+   then `DATABASE_MIGRATION_URL="<direct connection string>" pnpm db:migrate`
 3. Create a PowerSync Cloud instance: connect it to the Supabase DB as `powersync_role`,
-   enable **Use Supabase Auth**, and deploy the contents of `infra/powersync/sync-config.yaml`.
-4. Put the instance URL in `EXPO_PUBLIC_POWERSYNC_URL`.
+   enable **Use Supabase Auth**, and deploy the contents of `infra/powersync/sync-config.yaml`
+   (defines the `user_tasks` stream).
+4. Put the instance URL in `EXPO_PUBLIC_POWERSYNC_URL` (used by the connector PR).
 
 ### B. Fully self-hosted (Docker)
 
@@ -58,6 +61,7 @@ cd infra/supabase && cp .env.example .env && sh utils/generate-keys.sh && sh uti
 git checkout -- infra/supabase/docker-compose.yml   # overlay sets GOTRUE_JWT_KEYS; do not keep vendored edits
 pnpm infra:up                     # Supabase + PowerSync + API, waits for health checks
 pnpm infra:powersync:bootstrap    # replication role + publication in the Supabase DB
+pnpm db:migrate                   # creates public.tasks and adds it to the publication
 ```
 
 Studio: http://localhost:8000 · API gateway: http://localhost:8000 · PowerSync: http://localhost:8080 · API: http://localhost:3000.
@@ -110,10 +114,21 @@ On web the access token is in `localStorage` under `sb-<project-ref>-auth-token`
 CI (`.github/workflows/ci.yml`) always typechecks, lints and unit-tests. Expo web/iOS
 exports run when `apps/client` or `packages/contracts` change; the API image when
 `apps/api` or `packages/{contracts,database}` change; compose validation when compose
-files or `infra/` change. Pushes to `main` run every job. PRs do not export the Docker cache.
+files or `infra/` change; API integration tests when the API, contracts, database or
+PowerSync config change. Pushes to `main` run every job. PRs do not export the Docker cache.
 
 ## Testing policy
 
 - Unit tests for business logic (repositories, validation, pure helpers), colocated as `*.test.ts`.
-- Targeted integration tests for authorization and PowerSync upload handling in `apps/api/test/integration` (need a database; not run in basic CI).
+- Targeted integration tests for authorization and PowerSync upload handling in `apps/api/test/integration` (need a database; CI runs them in the `integration` job against `supabase/postgres`).
 - No end-to-end suite.
+
+API integration tests against the **self-hosted** stack only, never Cloud:
+
+```sh
+pnpm infra:up
+pnpm infra:powersync:bootstrap
+pnpm db:migrate
+DATABASE_URL=postgresql://postgres:<password>@localhost:5432/postgres \
+  pnpm --filter @todoist-clone/api test:integration
+```
