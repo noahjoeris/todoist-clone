@@ -28,11 +28,11 @@ compose.local.yaml      Local overlays (ES256 JWT on auth, PowerSync) + API
 The client currently supports local guest tasks (title, description, priority, date and optional
 time) with a live list: complete and reopen from the checkbox, edit from the task, and delete
 with an 8-second Undo. Completed tasks sit in a collapsed section. Email/password accounts
-with email-link confirmation and persistent sessions are available when cloud env is set.
-Guest tasks stay on the device and are hidden while signed in; after sign-in the app
-offers to add them to the account (or skip / don't ask again), preserving completion.
-Signed-in users sync account-owned tasks through PowerSync, including completion and
-restores. Guest-only use needs no `.env`: run `pnpm install`,
+with email-link confirmation, password reset, email change, and persistent sessions are
+available when cloud env is set. Guest tasks stay on the device and are hidden while signed
+in; after sign-in the app offers to add them to the account (or skip / don't ask again),
+preserving completion. Signed-in users sync account-owned tasks through PowerSync, including
+completion and restores. Guest-only use needs no `.env`: run `pnpm install`,
 `pnpm build`, then `pnpm --filter @todoist-clone/client web` (or a native development build).
 
 This project is pre-release: schema changes replace the initial Drizzle migration in place.
@@ -85,18 +85,24 @@ Accounts are email + password with confirmation through the link in Supabase's d
 
 1. **Authentication → Sign In / Providers → Email**: enabled, with *Confirm email* on.
 2. **Authentication → URL Configuration → Site URL**: the web app's origin, e.g.
-   `http://localhost:8081` for `expo start --web`. The confirmation link redirects there with
-   the session in the URL fragment, and the web client picks it up and signs the user in.
+   `http://localhost:8081` for `expo start --web`. Confirmation, password-reset, and
+   email-change links redirect there with the session in the URL fragment, and the web client
+   picks it up. A recovery link opens the set-new-password screen; an email-change link
+   updates the signed-in address after confirmation.
 3. **Authentication → URL Configuration → Redirect URLs**: add
-   `todoist-clone://auth/callback`. Native `signUp` / `resend` pass that as `emailRedirectTo`
-   so the confirmation link opens the app (`scheme` in `apps/client/app.json`); the client
-   exchanges it for a session. The self-hosted stack allow-lists the same URL via
-   `compose.local.yaml` (`GOTRUE_URI_ALLOW_LIST`); extra URLs can be appended with
-   `ADDITIONAL_REDIRECT_URLS` in `infra/supabase/.env` (see
+   `todoist-clone://auth/callback`. Native `signUp` / `resend` / recovery / email-change pass
+   that as `emailRedirectTo` / `redirectTo` so the link opens the app (`scheme` in
+   `apps/client/app.json`); the client exchanges it for a session. The self-hosted stack
+   allow-lists the same URL via `compose.local.yaml` (`GOTRUE_URI_ALLOW_LIST`); extra URLs
+   can be appended with `ADDITIONAL_REDIRECT_URLS` in `infra/supabase/.env` (see
    [infra/supabase/README.project.md](infra/supabase/README.project.md)).
 4. Supabase's built-in email service only delivers to the project's team members and allows
    about 2 emails per hour; use a team address for development. Anything more needs custom SMTP
    (https://supabase.com/docs/guides/auth/auth-smtp), which also unlocks template editing.
+
+Forgot password lives on Sign in. Change email and change password live on the account
+screen. Changing email sends a confirmation link to the new address; the current address
+stays active until that link is opened.
 
 Sessions persist in AsyncStorage on native and `localStorage` on web. Sign-out only ends the
 current device's session. A non-empty PowerSync upload queue blocks sign-out until the

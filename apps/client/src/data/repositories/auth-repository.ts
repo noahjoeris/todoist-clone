@@ -1,4 +1,4 @@
-import type { Session, SupabaseClient } from '@supabase/supabase-js';
+import type { Session, SupabaseClient, User } from '@supabase/supabase-js';
 import { createSessionFromAuthUrl, parseAuthCallbackUrl } from '../supabase/auth-callback';
 import type { RegisterAuthDeepLink } from '../supabase/auth-deep-link';
 import {
@@ -7,6 +7,8 @@ import {
   type AuthUser,
   type Credentials,
   credentialsSchema,
+  emailSchema,
+  passwordSchema,
   toAuthFailure,
 } from './auth';
 import type { AuthUrlError } from './auth-url';
@@ -26,6 +28,12 @@ export interface AuthRepository {
   signIn(credentials: Credentials): Promise<void>;
   /** Emails a fresh confirmation link for an unconfirmed account. */
   resendConfirmation(email: string): Promise<void>;
+  /** Emails a password-recovery link. The account is not enumerated on success. */
+  requestPasswordReset(email: string): Promise<void>;
+  /** Sets a new password (recovery session or signed-in change). */
+  updatePassword(password: string): Promise<void>;
+  /** Starts an email change; the new address must be confirmed from the emailed link. */
+  updateEmail(email: string): Promise<void>;
   /** Ends this device's session only; other devices stay signed in. */
   signOut(): Promise<void>;
   /** Stops refresh timers and listeners. The repository is unusable afterwards. */
@@ -40,6 +48,8 @@ export type AuthClient = Pick<
   | 'signUp'
   | 'signInWithPassword'
   | 'resend'
+  | 'resetPasswordForEmail'
+  | 'updateUser'
   | 'signOut'
   | 'startAutoRefresh'
   | 'stopAutoRefresh'
@@ -51,7 +61,10 @@ export type AuthClient = Pick<
 export type RegisterLifecycle = (auth: AuthClient) => () => void;
 
 export interface AuthRepositoryOptions {
-  /** Native confirmation emails redirect here. Omitted on web so the Site URL is used. */
+  /**
+   * Native confirmation, recovery, and email-change emails redirect here. Omitted on web so
+   * the Site URL is used.
+   */
   emailRedirectTo?: string;
   /** Native `Linking` listener; web is a no-op. */
   registerDeepLink?: RegisterAuthDeepLink;
@@ -60,6 +73,11 @@ export interface AuthRepositoryOptions {
    * / recovery redirects). Native omits this; deep-link errors go through the callback exchange.
    */
   urlAuthError?: AuthUrlError | null;
+  /**
+   * True when the page URL is a recovery redirect (`type=recovery`). Combined with
+   * `PASSWORD_RECOVERY` so the signed-in state asks for a new password.
+   */
+  passwordRecoveryFromUrl?: boolean;
 }
 
 export function createAuthRepository(
@@ -77,28 +95,54 @@ export function createAuthRepository(
   // True while a parsed confirmation callback is exchanging, so a getSession(null)
   // that starts after the parse cannot apply signed-out and flash guest UI.
   let authCallbackInFlight = false;
+  let pendingPasswordRecovery = options.passwordRecoveryFromUrl === true;
 
   function setState(next: AuthState) {
     state = next;
     for (const listener of listeners) listener(state);
   }
 
-  function applySession(session: Session | null) {
+  function applySession(session: Session | null, extras?: { passwordRecovery?: true }) {
     if (session) {
       guestOverride = false;
-      setState({ status: 'signed-in', user: toAuthUser(session) });
+      const passwordRecovery =
+        extras?.passwordRecovery === true ||
+        (state.status === 'signed-in' && state.passwordRecovery === true);
+      setState(
+        passwordRecovery
+          ? { status: 'signed-in', user: toAuthUser(session), passwordRecovery: true }
+          : { status: 'signed-in', user: toAuthUser(session) },
+      );
       return;
     }
+    pendingPasswordRecovery = false;
     // A no-session event after restore already published `signed-out` must not drop
     // `redirectError`. Real sign-out is `signed-in` → `signed-out`.
     if (state.status === 'signed-out') return;
     setState({ status: 'signed-out' });
   }
 
+  function signedInUser(user: User | AuthUser): AuthUser {
+    return { id: user.id, email: user.email ?? null };
+  }
+
+  function clearPasswordRecovery(user?: User | null) {
+    pendingPasswordRecovery = false;
+    if (state.status !== 'signed-in') return;
+    setState({ status: 'signed-in', user: user ? signedInUser(user) : state.user });
+  }
+
   // Covers sign-ins from `_recoverAndRefresh`, token refreshes, and revoked sessions.
   // Startup (`INITIAL_SESSION`, and `SIGNED_OUT` while restoring / restore-failed) is
   // ignored: `restoreSession` owns the first terminal state, including `redirectError`.
   const { data: authListener } = auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      pendingPasswordRecovery = true;
+      if (guestOverride) return;
+      if (state.status === 'restoring' || state.status === 'restore-failed') return;
+      if (session) applySession(session, { passwordRecovery: true });
+      return;
+    }
     if (event === 'INITIAL_SESSION' || guestOverride) return;
     if (state.status === 'restoring' || state.status === 'restore-failed') return;
     if (event === 'SIGNED_OUT') {
@@ -121,9 +165,13 @@ export function createAuthRepository(
         if (error) throw error;
         if (generation !== restorationGeneration || authCallbackInFlight) return;
         if (data.session) {
-          applySession(data.session);
+          applySession(
+            data.session,
+            pendingPasswordRecovery ? { passwordRecovery: true } : undefined,
+          );
           return;
         }
+        pendingPasswordRecovery = false;
         const redirectError = options.urlAuthError
           ? toAuthFailure(options.urlAuthError)
           : undefined;
@@ -206,6 +254,7 @@ export function createAuthRepository(
     continueAsGuest() {
       restorationGeneration += 1;
       guestOverride = true;
+      pendingPasswordRecovery = false;
       setState({ status: 'signed-out' });
     },
 
@@ -251,6 +300,46 @@ export function createAuthRepository(
       if (error) throw toAuthFailure(error);
     },
 
+    async requestPasswordReset(email) {
+      try {
+        const parsed = emailSchema.parse(email);
+        const { error } = await auth.resetPasswordForEmail(
+          parsed,
+          emailRedirectToOptions(options.emailRedirectTo),
+        );
+        if (error) throw error;
+      } catch (error) {
+        throw toAuthFailure(error);
+      }
+    },
+
+    async updatePassword(password) {
+      try {
+        const parsed = passwordSchema.parse(password);
+        const { data, error } = await auth.updateUser({ password: parsed });
+        if (error) throw error;
+        clearPasswordRecovery(data.user);
+      } catch (error) {
+        throw toAuthFailure(error);
+      }
+    },
+
+    async updateEmail(email) {
+      try {
+        const parsed = emailSchema.parse(email);
+        if (state.status === 'signed-in' && state.user.email === parsed) {
+          throw new AuthFailure('invalid-input', 'Enter a different email address.');
+        }
+        const { error } = await auth.updateUser(
+          { email: parsed },
+          options.emailRedirectTo ? { emailRedirectTo: options.emailRedirectTo } : undefined,
+        );
+        if (error) throw error;
+      } catch (error) {
+        throw toAuthFailure(error);
+      }
+    },
+
     async signOut() {
       // supabase-js still hits the server for `scope: 'local'` and skips `_removeSession()`
       // on retryable fetch errors. Apply signed-out locally either way so guest tasks stay
@@ -274,6 +363,12 @@ function emailRedirectOptions(
   emailRedirectTo: string | undefined,
 ): { options: { emailRedirectTo: string } } | Record<string, never> {
   return emailRedirectTo !== undefined ? { options: { emailRedirectTo } } : {};
+}
+
+function emailRedirectToOptions(
+  emailRedirectTo: string | undefined,
+): { redirectTo: string } | Record<string, never> {
+  return emailRedirectTo !== undefined ? { redirectTo: emailRedirectTo } : {};
 }
 
 function toAuthUser(session: Session): AuthUser {

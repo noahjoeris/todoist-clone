@@ -12,6 +12,7 @@ interface SignInScreenProps {
   onCreateAccount: () => void;
   /** The account exists but its email is unconfirmed; show the confirmation instructions. */
   onConfirmEmail: (email: string) => void;
+  onForgotPassword: (email: string) => void;
   onCancel: () => void;
   /** Redirect error to show before the user submits (e.g. expired confirmation link). */
   initialError?: AuthFailure;
@@ -21,6 +22,7 @@ export function SignInScreen({
   auth,
   onCreateAccount,
   onConfirmEmail,
+  onForgotPassword,
   onCancel,
   initialError,
 }: SignInScreenProps) {
@@ -77,6 +79,11 @@ export function SignInScreen({
           onPress={() => void submit()}
         />
         <ActionButton label="Create account" disabled={pending} onPress={onCreateAccount} />
+        <ActionButton
+          label="Forgot password"
+          disabled={pending}
+          onPress={() => onForgotPassword(email.trim().toLowerCase())}
+        />
         <ActionButton label="Cancel" color={colors.muted} disabled={pending} onPress={onCancel} />
       </View>
     </FormScreen>

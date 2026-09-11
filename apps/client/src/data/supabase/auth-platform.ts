@@ -17,7 +17,10 @@ export interface AuthPlatformOptions {
    * Omitted on web so supabase-js stays on the implicit grant + `detectSessionInUrl`.
    */
   flowType?: 'pkce' | 'implicit';
-  /** Native confirmation emails redirect here. Omitted on web (Site URL + `detectSessionInUrl`). */
+  /**
+   * Native confirmation, recovery, and email-change emails redirect here. Omitted on web
+   * (Site URL + `detectSessionInUrl`).
+   */
   emailRedirectTo?: string;
   /**
    * Current page URL so confirmation/recovery error params can be parsed before

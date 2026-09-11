@@ -139,35 +139,41 @@ that table; it does not convert `local_tasks` in place (ADR-016).
 ### ADR-012 Supabase Auth behind an `AuthRepository`; guest tasks hidden while signed in
 
 Email/password authentication with confirmation through the link in Supabase's default email is
-the first cloud feature. (A typed 6-digit code would give the same UX on every platform, but
-Supabase Cloud only allows editing the email template with custom SMTP.) Consequences:
+the first cloud feature, including password recovery and email change. (A typed 6-digit code
+would give the same UX on every platform, but Supabase Cloud only allows editing the email
+template with custom SMTP.) Consequences:
 
 - **Boundary.** `src/data/repositories/auth-repository.ts` is the only place the UI reaches auth
   from. It exposes an observable `AuthState` (`restoring` / `restore-failed` / `signed-out` /
-  `signed-in`) and intention-revealing operations; every failure is an `AuthFailure` with an
-  app-level code and a user-facing message. Supabase sessions, tokens and error shapes never
-  leave `src/data`. The UI only learns the user's id and email.
+  `signed-in`, with optional `passwordRecovery` on signed-in) and intention-revealing
+  operations (`signUp` / `signIn` / `requestPasswordReset` / `updatePassword` / `updateEmail`);
+  every failure is an `AuthFailure` with an app-level code and a user-facing message.
+  Supabase sessions, tokens and error shapes never leave `src/data`. The UI only learns the
+  user's id and email.
 - **Optional configuration.** `loadCloudEnv()` reads the four public variables (Supabase URL and
   publishable key, PowerSync URL, API URL). All unset means guest-only mode; a partial or
   malformed set is reported inside the app while guest tasks keep working.
 - **Platform options (extends ADR-007).** `auth-platform.native.ts` supplies AsyncStorage,
   sets `flowType: 'pkce'`, and leaves URL session detection off (`detectSessionInUrl: false`):
-  there is no `window.location` on native, so confirmation is completed by
-  `auth-deep-link.native.ts` (`Linking` + `exchangeCodeForSession` / `setSession`) after
-  `signUp` / `resend` pass `emailRedirectTo: 'todoist-clone://auth/callback'`. PKCE puts the
-  grant in `?code=` (query survives Android intents and email clients); `setSession` remains
-  a fallback for implicit hash tokens from old links. The resulting session is applied in
+  there is no `window.location` on native, so confirmation / recovery / email-change is
+  completed by `auth-deep-link.native.ts` (`Linking` + `exchangeCodeForSession` /
+  `setSession`) after `signUp` / `resend` / recovery / email-change pass
+  `emailRedirectTo` / `redirectTo: 'todoist-clone://auth/callback'`. PKCE puts the grant in
+  `?code=` (query survives Android intents and email clients); `setSession` remains a
+  fallback for implicit hash tokens from old links. The resulting session is applied in
   `AuthRepository` and rides the existing auth-state / PowerSync lifecycle (ADR-015).
   `auth-platform.web.ts` keeps supabase-js on `localStorage` and the implicit grant
-  (`detectSessionInUrl: true`; no `flowType`), so the confirmation redirect to the Site URL
-  signs the user in; web does not pass `emailRedirectTo`. Failed web redirects (`error` /
-  `error_code` / `error_description` in the query or fragment, typically `otp_expired`) are
-  parsed from the page URL before supabase-js runs and surfaced as an `AuthFailure` on
-  `signed-out` (`redirectError`) so Sign in can show them and offer the existing
-  resend-confirmation path. Native does not read the page URL; deep-link errors go through
-  the confirmation callback exchange. `auth-lifecycle.native.ts` starts/stops token
-  auto-refresh from `AppState`; the web variant is a no-op because supabase-js already
-  reacts to `visibilitychange`. The deprecated `lock` option is not used.
+  (`detectSessionInUrl: true`; no `flowType`), so confirmation and recovery redirects to the
+  Site URL sign the user in; web does not pass `emailRedirectTo`. Failed web redirects
+  (`error` / `error_code` / `error_description` in the query or fragment, typically
+  `otp_expired`) are parsed from the page URL before supabase-js runs and surfaced as an
+  `AuthFailure` on `signed-out` (`redirectError`) so Sign in can show them and offer the
+  existing resend-confirmation or forgot-password path. A successful recovery redirect
+  (`type=recovery` and/or `PASSWORD_RECOVERY`) is `signed-in` with `passwordRecovery: true`
+  until `updatePassword`. Native does not read the page URL; deep-link errors go through the
+  callback exchange. `auth-lifecycle.native.ts` starts/stops token auto-refresh from
+  `AppState`; the web variant is a no-op because supabase-js already reacts to
+  `visibilitychange`. The deprecated `lock` option is not used.
 - **Startup.** The root screen renders nothing until the stored session is resolved, so guest
   tasks never flash before an account view. A failed restoration (typically offline with an
   expired token) offers retry or an explicit "continue as guest"; after that choice, late
@@ -181,7 +187,7 @@ Supabase Cloud only allows editing the email template with custom SMTP.) Consequ
   other devices keep their sessions, and local state becomes signed-out even if the revoke
   request fails.
 - **Server side.** This ADR covers the client auth boundary. The API verifies the same
-  Supabase access tokens (ADR-013). Password recovery and social login come later.
+  Supabase access tokens (ADR-013). Social login comes later.
 
 ### ADR-013 The API verifies Supabase JWTs via JWKS (asymmetric only)
 
@@ -340,4 +346,5 @@ guest `local_tasks` and account-owned `tasks`.
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,
-different command), attachments/Storage, password recovery and social login.
+different command), attachments/Storage, native confirmation/recovery deep-link exchange,
+and social login.

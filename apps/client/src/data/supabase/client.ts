@@ -19,9 +19,10 @@ export function createSupabaseAuthConfig(platform: AuthPlatformOptions) {
  * Application data is read and written through the PowerSync repositories, never via PostgREST.
  *
  * Sessions persist across restarts and tokens refresh automatically; `registerAuthLifecycle`
- * pauses refresh while a native app is backgrounded. Email confirmation happens through the
- * link in Supabase's default email. Web picks the session up from the Site URL fragment;
- * native exchanges `todoist-clone://auth/callback` for a session.
+ * pauses refresh while a native app is backgrounded. Email confirmation, password recovery,
+ * and email-change confirmation happen through links in Supabase's default emails. Web picks
+ * the session up from the Site URL fragment; native exchanges `todoist-clone://auth/callback`
+ * for a session.
  */
 export function createSupabaseClient(
   env: Pick<CloudEnv, 'supabaseUrl' | 'supabasePublishableKey'>,

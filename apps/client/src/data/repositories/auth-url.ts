@@ -1,7 +1,7 @@
 /**
  * Auth errors that Supabase puts on the confirmation / recovery redirect URL
  * (`error`, `error_code`, `error_description` in the query or hash). Pure parsing
- * so password-reset can reuse it later without loading supabase-js.
+ * so password-reset and email-change can reuse it without loading supabase-js.
  */
 export class AuthUrlError {
   constructor(
@@ -26,6 +26,14 @@ export function parseAuthUrlError(href: string): AuthUrlError | null {
     return null;
   }
   return new AuthUrlError(errorCode ?? error, errorDescription);
+}
+
+/**
+ * Reads the Supabase `type` param from a redirect URL (`recovery`, `signup`,
+ * `email_change`, …). Used to detect a password-recovery session on web.
+ */
+export function parseAuthUrlType(href: string): string | undefined {
+  return emptyToUndefined(paramsFromHref(href).type);
 }
 
 function paramsFromHref(href: string): Record<string, string> {

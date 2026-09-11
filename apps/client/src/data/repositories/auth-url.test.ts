@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AuthUrlError, parseAuthUrlError } from './auth-url';
+import { AuthUrlError, parseAuthUrlError, parseAuthUrlType } from './auth-url';
 
 describe('parseAuthUrlError', () => {
   it('reads error params from the URL fragment', () => {
@@ -51,5 +51,38 @@ describe('parseAuthUrlError', () => {
     expect(
       parseAuthUrlError('https://app.example/#error=&error_code=&error_description='),
     ).toBeNull();
+  });
+});
+
+describe('parseAuthUrlType', () => {
+  it('reads type from the fragment (implicit recovery / email-change redirects)', () => {
+    expect(
+      parseAuthUrlType(
+        'https://app.example/#access_token=abc&expires_in=3600&refresh_token=def&token_type=bearer&type=recovery',
+      ),
+    ).toBe('recovery');
+    expect(parseAuthUrlType('https://app.example/#type=email_change&access_token=abc')).toBe(
+      'email_change',
+    );
+  });
+
+  it('reads type from the query string', () => {
+    expect(parseAuthUrlType('https://app.example/?code=pkce&type=recovery')).toBe('recovery');
+  });
+
+  it('lets query values override the fragment', () => {
+    expect(parseAuthUrlType('https://app.example/?type=recovery#type=signup')).toBe('recovery');
+  });
+
+  it('reads type from the native callback scheme', () => {
+    expect(parseAuthUrlType('todoist-clone://auth/callback#access_token=abc&type=recovery')).toBe(
+      'recovery',
+    );
+  });
+
+  it('returns undefined when type is missing or blank', () => {
+    expect(parseAuthUrlType('https://app.example/#access_token=abc')).toBeUndefined();
+    expect(parseAuthUrlType('https://app.example/#type=')).toBeUndefined();
+    expect(parseAuthUrlType('not a url')).toBeUndefined();
   });
 });

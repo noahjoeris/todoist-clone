@@ -15,25 +15,31 @@ export interface AuthUser {
  *   expired token). The user can retry or explicitly continue as guest.
  * - `signed-out.redirectError`: a confirmation/recovery redirect failed (e.g. expired
  *   OTP). Present only on the first signed-out state after restore so the UI can show it.
+ * - `signed-in.passwordRecovery`: the session came from a recovery link; the UI must collect a
+ *   new password before the rest of the account view.
  */
 export type AuthState =
   | { status: 'restoring' }
   | { status: 'restore-failed'; error: AuthFailure }
   | { status: 'signed-out'; redirectError?: AuthFailure }
-  | { status: 'signed-in'; user: AuthUser };
+  | { status: 'signed-in'; user: AuthUser; passwordRecovery?: true };
 
 // Supabase's default minimum password length.
 export const MIN_PASSWORD_LENGTH = 6;
 
+export const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(z.email({ error: 'Enter a valid email address.' }));
+
+export const passwordSchema = z
+  .string()
+  .min(MIN_PASSWORD_LENGTH, { error: `Use at least ${MIN_PASSWORD_LENGTH} characters.` });
+
 export const credentialsSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .pipe(z.email({ error: 'Enter a valid email address.' })),
-  password: z
-    .string()
-    .min(MIN_PASSWORD_LENGTH, { error: `Use at least ${MIN_PASSWORD_LENGTH} characters.` }),
+  email: emailSchema,
+  password: passwordSchema,
 });
 
 export type Credentials = z.infer<typeof credentialsSchema>;
@@ -44,7 +50,10 @@ export type AuthFailureCode =
   | 'email-not-confirmed'
   | 'email-taken'
   | 'weak-password'
+  | 'same-password'
   | 'otp-expired'
+  | 'session-expired'
+  | 'reauthentication-needed'
   | 'rate-limited'
   | 'network'
   | 'unknown';
@@ -71,7 +80,10 @@ const DEFAULT_MESSAGES: Record<AuthFailureCode, string> = {
   'email-not-confirmed': 'Confirm your email address to sign in.',
   'email-taken': 'An account with this email already exists. Sign in instead.',
   'weak-password': `Use at least ${MIN_PASSWORD_LENGTH} characters.`,
+  'same-password': 'Choose a different password from your current one.',
   'otp-expired': 'This link has expired. Request a new one and try again.',
+  'session-expired': 'This link has expired. Request a new one and try again.',
+  'reauthentication-needed': 'Sign in again to change this.',
   'rate-limited': 'Too many attempts. Wait a moment and try again.',
   network: 'Couldn’t reach the server. Check your connection and try again.',
   unknown: 'Something went wrong. Try again.',
@@ -84,16 +96,26 @@ const SUPABASE_ERROR_CODES: Record<string, AuthFailureCode> = {
   user_already_exists: 'email-taken',
   email_exists: 'email-taken',
   weak_password: 'weak-password',
+  same_password: 'same-password',
   otp_expired: 'otp-expired',
   'otp-expired': 'otp-expired',
+  session_expired: 'session-expired',
+  session_not_found: 'session-expired',
+  reauthentication_needed: 'reauthentication-needed',
+  reauthentication_not_valid: 'reauthentication-needed',
   over_request_rate_limit: 'rate-limited',
   over_email_send_rate_limit: 'rate-limited',
   validation_failed: 'invalid-input',
   email_address_invalid: 'invalid-input',
+  email_address_not_authorized: 'invalid-input',
 };
 
 // Server messages worth relaying verbatim (they explain *what* is wrong with the input).
-const RELAY_SERVER_MESSAGE = new Set<AuthFailureCode>(['weak-password', 'invalid-input']);
+const RELAY_SERVER_MESSAGE = new Set<AuthFailureCode>([
+  'weak-password',
+  'same-password',
+  'invalid-input',
+]);
 
 /** Translates any thrown value (Supabase error, Zod error, network failure) into an AuthFailure. */
 export function toAuthFailure(error: unknown): AuthFailure {
