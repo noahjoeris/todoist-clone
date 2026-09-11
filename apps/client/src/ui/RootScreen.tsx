@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import type { AuthRepository, SyncStatusSource, TaskRepositories } from '../data/repositories';
+import { StyleSheet, View } from 'react-native';
+import type {
+  AuthRepository,
+  GuestTaskAdoptionRepository,
+  SyncStatusSource,
+  TaskRepositories,
+} from '../data/repositories';
 import type { DataSystem } from '../data/system';
 import { canWriteAccountTasks } from './account-write-ready';
+import { GuestTaskAdoptionBanner } from './components/GuestTaskAdoptionBanner';
 import { useAuthState } from './hooks/useAuthState';
 import { AccountScreen } from './screens/AccountScreen';
 import { ConfirmEmailScreen } from './screens/ConfirmEmailScreen';
@@ -34,7 +41,14 @@ export function RootScreen({ system }: { system: DataSystem }) {
       if (sync == null) {
         throw new Error('Cloud auth is available without a sync status source');
       }
-      return <AccountAwareScreen tasks={system.tasks} auth={system.auth.repository} sync={sync} />;
+      return (
+        <AccountAwareScreen
+          tasks={system.tasks}
+          auth={system.auth.repository}
+          sync={sync}
+          guestTaskAdoption={system.guestTaskAdoption}
+        />
+      );
     }
   }
 }
@@ -49,10 +63,12 @@ function AccountAwareScreen({
   tasks,
   auth,
   sync,
+  guestTaskAdoption,
 }: {
   tasks: TaskRepositories;
   auth: AuthRepository;
   sync: SyncStatusSource;
+  guestTaskAdoption: GuestTaskAdoptionRepository;
 }) {
   const authState = useAuthState(auth);
   const [screen, setScreen] = useState<AuthScreen | null>(null);
@@ -93,15 +109,18 @@ function AccountAwareScreen({
         );
       }
       return (
-        <HomeScreen
-          repository={userTasks}
-          account={{
-            kind: 'account',
-            label: authState.user.email ?? 'Account',
-            onPress: () => setScreen({ name: 'account' }),
-          }}
-          sync={sync}
-        />
+        <View style={styles.signedIn}>
+          <GuestTaskAdoptionBanner repository={guestTaskAdoption} userId={authState.user.id} />
+          <HomeScreen
+            repository={userTasks}
+            account={{
+              kind: 'account',
+              label: authState.user.email ?? 'Account',
+              onPress: () => setScreen({ name: 'account' }),
+            }}
+            sync={sync}
+          />
+        </View>
       );
     case 'signed-out':
       break;
@@ -159,3 +178,7 @@ function useAccountLocalDataReady(sync: SyncStatusSource, userId: string | null)
     () => canWriteAccountTasks(userId, sync),
   );
 }
+
+const styles = StyleSheet.create({
+  signedIn: { flex: 1 },
+});

@@ -5,7 +5,9 @@ import { createPowerSyncDatabase } from './powersync/create-database';
 import {
   type AuthRepository,
   createAuthRepository,
+  createGuestTaskAdoptionRepository,
   createTaskRepositories,
+  type GuestTaskAdoptionRepository,
   type SyncStatusSource,
   type TaskRepositories,
 } from './repositories';
@@ -29,6 +31,7 @@ import { createSyncOwnerStore } from './sync/sync-owner-store';
 export interface DataSystem {
   powersync: CommonPowerSyncDatabase;
   tasks: TaskRepositories;
+  guestTaskAdoption: GuestTaskAdoptionRepository;
   auth: AuthAvailability;
   sync?: SyncStatusSource;
   dispose(): void;
@@ -46,17 +49,22 @@ export type AuthAvailability =
 export function createDataSystem(): DataSystem {
   const powersync = createPowerSyncDatabase();
   const tasks = createTaskRepositories(powersync, randomUUID);
-  const cloud = createCloudServices(powersync);
+  const guestTaskAdoption = createGuestTaskAdoptionRepository(powersync);
+  const cloud = createCloudServices(powersync, guestTaskAdoption);
   return {
     powersync,
     tasks,
+    guestTaskAdoption,
     auth: cloud.auth,
     ...(cloud.sync ? { sync: cloud.sync } : {}),
     dispose: cloud.dispose,
   };
 }
 
-function createCloudServices(powersync: CommonPowerSyncDatabase): {
+function createCloudServices(
+  powersync: CommonPowerSyncDatabase,
+  guestTaskAdoption: GuestTaskAdoptionRepository,
+): {
   auth: AuthAvailability;
   sync?: SyncStatusSource;
   dispose(): void;
@@ -84,10 +92,14 @@ function createCloudServices(powersync: CommonPowerSyncDatabase): {
         createSyncOwnerStore(),
         localData,
       );
+      const stopAdoptionReset = repository.subscribe((state) => {
+        if (state.status === 'signed-out') guestTaskAdoption.reset();
+      });
       return {
         auth: { status: 'available', repository },
         sync: createSyncStatusSource(powersync, localData),
         dispose() {
+          stopAdoptionReset();
           stopSync();
           repository.dispose();
         },

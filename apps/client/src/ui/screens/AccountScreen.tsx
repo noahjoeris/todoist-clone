@@ -40,7 +40,7 @@ export function AccountScreen({ auth, user, onBack, sync }: AccountScreenProps) 
         <Text style={styles.email}>{user.email ?? user.id}</Text>
       </View>
       <Text style={styles.note}>
-        The tasks you created as a guest stay on this device and come back when you sign out.
+        Guest tasks stay on this device unless you add them to this account.
       </Text>
       {error && <FormError message={error.message} />}
       <View style={styles.actions}>

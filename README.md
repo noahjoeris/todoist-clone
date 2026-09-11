@@ -27,7 +27,8 @@ compose.local.yaml      Local overlays (ES256 JWT on auth, PowerSync) + API
 
 The client currently supports local guest tasks (title, description, priority, date and optional
 time) with a live list, plus email/password accounts with email-link confirmation and persistent
-sessions. Guest tasks stay on the device and are hidden while signed in; signed-in users sync
+sessions. Guest tasks stay on the device and are hidden while signed in; after sign-in the app
+offers to add them to the account (or skip / don't ask again). Signed-in users sync
 account-owned tasks through PowerSync. Guest-only use needs no `.env`: run `pnpm install`,
 `pnpm build`, then `pnpm --filter @todoist-clone/client web` (or a native development build).
 
