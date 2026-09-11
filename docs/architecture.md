@@ -221,6 +221,15 @@ to `POST /sync/upload`. The API applies a batch atomically in one Drizzle transa
   row, not the partial payload. Clearing the date also clears a leftover time. A
   time-only patch on a dated row is allowed. An explicit time without a date is
   400 `invalid-request`.
+- `completed_at` is a client-owned timestamptz. PUT omission or null means the
+  task is active (PowerSync omits nulls). PATCH omission leaves completion
+  unchanged; explicit null reopens. A title/description PATCH must not rewrite
+  completion. Completing again while already complete is a client no-op that
+  preserves the original timestamp.
+- DELETE of an owned row followed by a PUT of the same id restores that snapshot
+  (same id, fields, `created_at`, and `completed_at`). The API applies the batch
+  in order, atomically; a retry of DELETE → PUT is idempotent (missing DELETE is
+  a no-op, PUT upserts).
 - Any 403 rolls back the whole batch, including earlier PUTs in that request.
 - **Connector:** 2xx → `complete()` the PowerSync transaction. 400/403 → log the body and
   `complete()` (client bug or abuse; the SQLite batch is discarded). **401 throws** so
@@ -293,7 +302,35 @@ clearLocal: false })`.
 
 The banner mounts only after local-data readiness (ADR-015) so adoption cannot write into
 a queue that is about to be cleared. Do not convert `local_tasks` in place or upload
-ownerless rows (ADR-011).
+ownerless rows (ADR-011). Adoption copies `completed_at` with the other fields.
+
+### ADR-017 Task completion, field-level edits, and session undo
+
+The basic task lifecycle (complete, edit, delete) is local-first and identical for
+guest `local_tasks` and account-owned `tasks`.
+
+- **Completion.** A nullable `completed_at` timestamptz (SQLite text ISO-8601) is
+  the only completion field. The repository `setCompletion(id, completed)` writes
+  explicitly; it does not toggle from UI state. Completing an already-completed
+  row keeps the original timestamp; reopening sets null and leaves schedule and
+  other fields intact; completing again records a new timestamp. Active tasks are
+  the default list; completed tasks sit in a separate, initially collapsed
+  section ordered by `completed_at` descending, then id.
+- **Edits.** Create and edit share one form/validation path (`taskInputSchema`).
+  Saves issue field-level UPDATEs for changed editable columns only, so a title
+  edit cannot overwrite a newer remote completion. Ids, ownership, and
+  `created_at` are not editable. A save against a row that disappeared (deleted
+  remotely or locally) reports missing and does not INSERT a replacement.
+- **Delete and undo.** Delete reads the snapshot and deletes in one
+  `writeTransaction`. Undo is session-scoped UI state (8 seconds, latest deletion
+  wins, cleared on account/session change or process restart) and restores by
+  INSERT of the captured snapshot with the original id — never `INSERT OR
+  REPLACE`. If that id exists locally, restore fails and Undo stays until expiry.
+  Guest undo stays on `local_tasks`; account undo uploads as a normal PowerSync
+  PUT (ADR-014). There is no persistent trash.
+- **Parity.** Guest and account repositories expose the same operations;
+  account reads/writes are owner-scoped. Offline writes land in SQLite;
+  account changes sync through the existing upload endpoint.
 
 ## Deferred
 
