@@ -1,6 +1,18 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { CloudEnv } from '../../config/env';
-import { authPlatformOptions } from './auth-platform';
+import { type AuthPlatformOptions, authPlatformOptions } from './auth-platform';
+
+/** Maps platform auth options to the `auth` object passed to `createClient`. */
+export function createSupabaseAuthConfig(platform: AuthPlatformOptions) {
+  const { storage, detectSessionInUrl, flowType } = platform;
+  return {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl,
+    ...(storage ? { storage } : {}),
+    ...(flowType ? { flowType } : {}),
+  };
+}
 
 /**
  * Supabase is used on the client for Auth (and later Storage) only.
@@ -14,13 +26,7 @@ import { authPlatformOptions } from './auth-platform';
 export function createSupabaseClient(
   env: Pick<CloudEnv, 'supabaseUrl' | 'supabasePublishableKey'>,
 ): SupabaseClient {
-  const { storage, detectSessionInUrl } = authPlatformOptions;
   return createClient(env.supabaseUrl, env.supabasePublishableKey, {
-    auth: {
-      ...(storage ? { storage } : {}),
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl,
-    },
+    auth: createSupabaseAuthConfig(authPlatformOptions),
   });
 }

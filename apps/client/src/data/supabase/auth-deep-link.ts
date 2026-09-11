@@ -6,7 +6,7 @@
  * Site URL fragment). This file exists so TypeScript has a single declaration to
  * type-check against; it must never be bundled.
  */
-export type RegisterAuthDeepLink = (onUrl: (url: string) => Promise<void>) => () => void;
+export type RegisterAuthDeepLink = (onUrl: (url: string) => Promise<boolean>) => () => void;
 
 export const registerAuthDeepLink: RegisterAuthDeepLink = () => {
   throw new Error(

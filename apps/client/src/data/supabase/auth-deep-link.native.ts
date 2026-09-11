@@ -1,18 +1,19 @@
 import { Linking } from 'react-native';
 import type { RegisterAuthDeepLink } from './auth-deep-link';
+import { createAuthDeepLinkHandler } from './auth-deep-link-guard';
 
 // Confirmation emails redirect to `todoist-clone://auth/callback`. Cold start uses
-// `getInitialURL`; a running app uses the `url` event. Duplicate deliveries of the
-// same URL are ignored (`code` is single-use).
+// `getInitialURL`; a running app uses the `url` event. In-flight and already-consumed
+// URLs are ignored (`code` is single-use); a failed exchange can be retried.
 export const registerAuthDeepLink: RegisterAuthDeepLink = (onUrl) => {
-  let lastUrl: string | undefined;
-  const handle = (url: string | null) => {
-    if (url == null || url === lastUrl) return;
-    lastUrl = url;
-    void onUrl(url);
-  };
+  const handle = createAuthDeepLinkHandler(onUrl);
 
-  void Linking.getInitialURL().then(handle, () => {});
-  const subscription = Linking.addEventListener('url', (event) => handle(event.url));
+  void Linking.getInitialURL().then(
+    (url) => void handle(url),
+    () => {},
+  );
+  const subscription = Linking.addEventListener('url', (event) => {
+    void handle(event.url);
+  });
   return () => subscription.remove();
 };

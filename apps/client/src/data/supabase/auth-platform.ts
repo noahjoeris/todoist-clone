@@ -12,6 +12,11 @@ export interface AuthPlatformOptions {
   storage?: SupportedStorage;
   /** Whether to pick up a session from the page URL after an email confirmation redirect. */
   detectSessionInUrl: boolean;
+  /**
+   * Native uses PKCE so confirmation redirects carry `?code=` (query survives Linking).
+   * Omitted on web so supabase-js stays on the implicit grant + `detectSessionInUrl`.
+   */
+  flowType?: 'pkce' | 'implicit';
   /** Native confirmation emails redirect here. Omitted on web (Site URL + `detectSessionInUrl`). */
   emailRedirectTo?: string;
 }

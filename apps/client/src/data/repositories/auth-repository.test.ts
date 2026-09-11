@@ -46,7 +46,7 @@ describe('auth repository', () => {
   const unregisterLifecycle = vi.fn();
   const unregisterDeepLink = vi.fn();
   const registerLifecycle = vi.fn(() => unregisterLifecycle);
-  let handleDeepLink!: (url: string) => Promise<void>;
+  let handleDeepLink!: (url: string) => Promise<boolean>;
   const registerDeepLink = vi.fn<RegisterAuthDeepLink>((onUrl) => {
     handleDeepLink = onUrl;
     return unregisterDeepLink;
@@ -509,6 +509,57 @@ describe('auth repository', () => {
       pending.resolve({ data: { session: null }, error: null });
       await restoration;
       expect(repository.getState().status).toBe('signed-in');
+    });
+
+    it('stays restoring until a cold-start confirmation exchange finishes', async () => {
+      const pendingRestore = deferred<{ data: { session: Session | null }; error: null }>();
+      const pendingExchange = deferred<{ data: { session: Session | null }; error: null }>();
+      auth.getSession.mockReturnValue(pendingRestore.promise);
+      auth.exchangeCodeForSession.mockReturnValue(pendingExchange.promise);
+      const repository = createRepository();
+      const restoration = repository.restoreSession();
+
+      const apply = handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=pkce-code`);
+      expect(repository.getState().status).toBe('restoring');
+
+      pendingRestore.resolve({ data: { session: null }, error: null });
+      await restoration;
+      expect(repository.getState().status).toBe('restoring');
+
+      pendingExchange.resolve({ data: { session: session() }, error: null });
+      await apply;
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+      });
+    });
+
+    it('does not stay restoring when confirmation exchange fails during restore', async () => {
+      const pendingRestore = deferred<{ data: { session: Session | null }; error: null }>();
+      const pendingExchange = deferred<{
+        data: { session: Session | null };
+        error: AuthApiError;
+      }>();
+      auth.getSession.mockReturnValue(pendingRestore.promise);
+      auth.exchangeCodeForSession.mockReturnValue(pendingExchange.promise);
+      const repository = createRepository();
+      const restoration = repository.restoreSession();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const apply = handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=stale`);
+      pendingRestore.resolve({ data: { session: null }, error: null });
+      await restoration;
+      expect(repository.getState().status).toBe('restoring');
+
+      pendingExchange.resolve({
+        data: { session: null },
+        error: new AuthApiError('expired', 403, 'otp_expired'),
+      });
+      await apply;
+
+      expect(repository.getState()).toEqual({ status: 'signed-out' });
+      expect(errorSpy).toHaveBeenCalled();
+      errorSpy.mockRestore();
     });
 
     it('omits emailRedirectTo when the platform does not supply one', async () => {
