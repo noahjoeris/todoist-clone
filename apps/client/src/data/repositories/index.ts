@@ -23,4 +23,9 @@ export {
   type SignUpOutcome,
 } from './auth-repository';
 export { type Task, type TaskInput, type TaskPriority, taskInputSchema } from './task';
-export { createTaskRepository, type TaskRepository } from './task-repository';
+export {
+  createTaskRepositories,
+  createTaskRepository,
+  type TaskRepositories,
+  type TaskRepository,
+} from './task-repository';

@@ -10,7 +10,7 @@ import type {
   WatchHandler,
 } from '@powersync/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTaskRepository } from './task-repository';
+import { createTaskRepositories, createTaskRepository } from './task-repository';
 
 // Exercise the repository's real SQL against SQLite. PowerSync's watch delivery is
 // simulated separately; browser smoke checks cover the actual PowerSync adapter.
@@ -121,5 +121,118 @@ describe('task repository', () => {
     handler?.onError?.(new Error('After unsubscribe'));
     expect(onTasks).toHaveBeenCalledOnce();
     expect(onError).toHaveBeenCalledOnce();
+  });
+});
+
+describe('account-owned task repository', () => {
+  const USER_A = '11111111-1111-4111-8111-111111111111';
+  const USER_B = '22222222-2222-4222-8222-222222222222';
+  let sqlite: DatabaseSync;
+  let directory: string;
+  const execute =
+    vi.fn<(sql: string, parameters?: SQLInputValue[]) => Promise<QueryResult<never>>>();
+  const watch = vi.fn<CommonPowerSyncDatabase['watchWithCallback']>();
+  const repositories = createTaskRepositories({ execute, watchWithCallback: watch }, randomUUID);
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    directory = mkdtempSync(join(tmpdir(), 'todoist-user-tasks-'));
+    sqlite = new DatabaseSync(join(directory, 'tasks.sqlite'));
+    sqlite.exec(`CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, description TEXT, priority INTEGER,
+      scheduled_date TEXT, scheduled_time TEXT, created_at TEXT, updated_at TEXT
+    )`);
+    execute.mockImplementation(async (sql, parameters = []) => {
+      sqlite.prepare(sql).run(...(parameters as SQLInputValue[]));
+      return {
+        array: [],
+        [Symbol.iterator]: () => [][Symbol.iterator](),
+      };
+    });
+  });
+
+  afterEach(() => {
+    sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('writes user_id and updated_at (= created_at) on insert', async () => {
+    await repositories.forUser(USER_A).create({
+      title: 'Owned',
+      scheduledDate: '2026-09-09',
+      scheduledTime: '14:30',
+    });
+    const row = sqlite.prepare('SELECT * FROM tasks').get() as {
+      user_id: string;
+      created_at: string;
+      updated_at: string;
+      scheduled_time: string;
+    };
+    expect(row.user_id).toBe(USER_A);
+    expect(row.updated_at).toBe(row.created_at);
+    expect(row.scheduled_time).toBe('14:30');
+  });
+
+  it('filters by user_id and normalizes HH:mm:ss scheduled_time to HH:mm', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO tasks
+        (id, user_id, title, description, priority, scheduled_date, scheduled_time, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        USER_A,
+        'Mine',
+        '',
+        4,
+        '2026-09-09',
+        '14:30:00',
+        '2026-09-09T10:00:00.000Z',
+        '2026-09-09T10:00:00.000Z',
+      );
+    sqlite
+      .prepare(
+        `INSERT INTO tasks
+        (id, user_id, title, description, priority, scheduled_date, scheduled_time, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        USER_B,
+        'Theirs',
+        '',
+        4,
+        null,
+        null,
+        '2026-09-09T11:00:00.000Z',
+        '2026-09-09T11:00:00.000Z',
+      );
+
+    watch.mockImplementation((sql, parameters, callback) => {
+      const array = sqlite.prepare(sql).all(...(parameters ?? []));
+      callback?.onResult({
+        array,
+        *[Symbol.iterator]() {
+          yield* array;
+          return undefined;
+        },
+      });
+    });
+
+    const onTasks = vi.fn();
+    repositories.forUser(USER_A).subscribe(onTasks, vi.fn());
+    expect(onTasks).toHaveBeenCalledOnce();
+    expect(onTasks.mock.calls[0]?.[0]).toEqual([
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        title: 'Mine',
+        description: '',
+        priority: 4,
+        scheduledDate: '2026-09-09',
+        scheduledTime: '14:30',
+        createdAt: '2026-09-09T10:00:00.000Z',
+      },
+    ]);
   });
 });
