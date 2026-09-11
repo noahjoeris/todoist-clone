@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import type { AuthRepository } from '../../data/repositories';
+import type { AuthFailure, AuthRepository } from '../../data/repositories';
 import { ActionButton } from '../components/ActionButton';
 import { FormError, FormScreen } from '../components/FormScreen';
 import { TextField } from '../components/TextField';
@@ -13,6 +13,8 @@ interface SignInScreenProps {
   /** The account exists but its email is unconfirmed; show the confirmation instructions. */
   onConfirmEmail: (email: string) => void;
   onCancel: () => void;
+  /** Redirect error to show before the user submits (e.g. expired confirmation link). */
+  initialError?: AuthFailure;
 }
 
 export function SignInScreen({
@@ -20,11 +22,12 @@ export function SignInScreen({
   onCreateAccount,
   onConfirmEmail,
   onCancel,
+  initialError,
 }: SignInScreenProps) {
   // Password lives only in component state and is dropped when this screen unmounts.
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { pending, error, run } = useAuthAction();
+  const { pending, error, run } = useAuthAction(initialError ?? null);
 
   const submit = () => run(() => auth.signIn({ email, password }));
   const canSubmit = !pending && email.trim() !== '' && password !== '';
@@ -57,7 +60,7 @@ export function SignInScreen({
       {error && (
         <View style={styles.errorBlock}>
           <FormError message={error.message} />
-          {error.code === 'email-not-confirmed' && (
+          {canResendConfirmation(error.code, email) && (
             <ActionButton
               label="Resend confirmation link"
               color={colors.green}
@@ -78,6 +81,11 @@ export function SignInScreen({
       </View>
     </FormScreen>
   );
+}
+
+function canResendConfirmation(code: AuthFailure['code'], email: string): boolean {
+  if (code === 'email-not-confirmed') return true;
+  return code === 'otp-expired' && email.trim() !== '';
 }
 
 const styles = StyleSheet.create({

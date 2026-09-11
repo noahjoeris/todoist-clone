@@ -4,9 +4,9 @@ import { useRef, useState } from 'react';
  * Runs one async action at a time: ignores duplicate submissions while pending
  * and keeps the last mapped failure for inline display.
  */
-export function useAsyncAction<E>(mapError: (cause: unknown) => E) {
+export function useAsyncAction<E>(mapError: (cause: unknown) => E, initialError: E | null = null) {
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<E | null>(null);
+  const [error, setError] = useState<E | null>(initialError);
   const running = useRef(false);
 
   async function run(action: () => Promise<void>) {

@@ -11,7 +11,9 @@ import {
   type SyncStatusSource,
   type TaskRepositories,
 } from './repositories';
+import { parseAuthUrlError } from './repositories/auth-url';
 import { registerAuthLifecycle } from './supabase/auth-lifecycle';
+import { authPlatformOptions } from './supabase/auth-platform';
 import { createSupabaseClient } from './supabase/client';
 import { createBackendConnector } from './sync/backend-connector';
 import {
@@ -76,8 +78,14 @@ function createCloudServices(
     case 'invalid':
       return { auth: { status: 'misconfigured', error: cloudEnv.error }, dispose() {} };
     case 'configured': {
+      // Parse before createClient: supabase-js may strip a successful session from the URL.
+      // Error params are left in place, but reading first keeps this reusable for both.
+      const href = authPlatformOptions.getLocationHref?.();
+      const urlAuthError = href ? parseAuthUrlError(href) : null;
       const supabase = createSupabaseClient(cloudEnv.env);
-      const repository = createAuthRepository(supabase.auth, registerAuthLifecycle);
+      const repository = createAuthRepository(supabase.auth, registerAuthLifecycle, {
+        ...(urlAuthError ? { urlAuthError } : {}),
+      });
       const localData = createLocalDataReadiness();
       const stopSync = startSyncLifecycle(
         powersync,
