@@ -2,6 +2,7 @@ import { AuthApiError, AuthRetryableFetchError } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { AuthFailure, credentialsSchema, toAuthFailure } from './auth';
+import { AuthUrlError, parseAuthUrlError } from './auth-url';
 
 describe('credentialsSchema', () => {
   it('normalises the email and enforces the minimum password length', () => {
@@ -29,6 +30,8 @@ describe('toAuthFailure', () => {
       ['invalid_credentials', 'invalid-credentials'],
       ['email_not_confirmed', 'email-not-confirmed'],
       ['user_already_exists', 'email-taken'],
+      ['otp_expired', 'otp-expired'],
+      ['otp-expired', 'otp-expired'],
       ['over_email_send_rate_limit', 'rate-limited'],
     ];
     for (const [supabaseCode, expected] of cases) {
@@ -68,5 +71,16 @@ describe('toAuthFailure', () => {
     const failure = toAuthFailure(cause);
     expect(failure.code).toBe('unknown');
     expect(failure.cause).toBe(cause);
+  });
+
+  it('maps otp_expired from a parsed redirect URL', () => {
+    const parsed = parseAuthUrlError(
+      'https://app.example/#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired',
+    );
+    expect(parsed).toBeInstanceOf(AuthUrlError);
+    const failure = toAuthFailure(parsed);
+    expect(failure.code).toBe('otp-expired');
+    expect(failure.message).toBe('This link has expired. Request a new one and try again.');
+    expect(failure.cause).toBe(parsed);
   });
 });

@@ -128,13 +128,13 @@ Scheduled dates (`YYYY-MM-DD`) and optional wall-clock times (`HH:mm`) are separ
 fields, not UTC instants; time requires a date. Deadlines and reminders are separate future
 features. Priority uses 1 (highest) through 4 (default).
 
-When auth and sync arrive, explicitly adopt guest tasks into an account-owned synced table,
-preserving IDs and copying successfully before removing local originals. Do not turn this
-guest table into a synced table in place or upload ownerless rows. Cloud adapters remain
-available but are not instantiated by the local-only composition root.
+Guest tasks are adopted into the account-owned synced table by an explicit copy+delete
+(ADR-016), preserving IDs. Do not turn this guest table into a synced table in place or
+upload ownerless rows. Cloud adapters remain available but are not instantiated by the
+local-only composition root.
 
 Account-owned rows live in `public.tasks` (ADR-014). Adoption copies `local_tasks` into
-that table in a later change; it does not convert `local_tasks` in place.
+that table; it does not convert `local_tasks` in place (ADR-016).
 
 ### ADR-012 Supabase Auth behind an `AuthRepository`; guest tasks hidden while signed in
 
@@ -160,9 +160,14 @@ Supabase Cloud only allows editing the email template with custom SMTP.) Consequ
   `AuthRepository` and rides the existing auth-state / PowerSync lifecycle (ADR-015).
   `auth-platform.web.ts` keeps supabase-js on `localStorage` and the implicit grant
   (`detectSessionInUrl: true`; no `flowType`), so the confirmation redirect to the Site URL
-  signs the user in; web does not pass `emailRedirectTo`. `auth-lifecycle.native.ts`
-  starts/stops token auto-refresh from `AppState`; the web variant is a no-op because
-  supabase-js already reacts to `visibilitychange`. The deprecated `lock` option is not used.
+  signs the user in; web does not pass `emailRedirectTo`. Failed web redirects (`error` /
+  `error_code` / `error_description` in the query or fragment, typically `otp_expired`) are
+  parsed from the page URL before supabase-js runs and surfaced as an `AuthFailure` on
+  `signed-out` (`redirectError`) so Sign in can show them and offer the existing
+  resend-confirmation path. Native does not read the page URL; deep-link errors go through
+  the confirmation callback exchange. `auth-lifecycle.native.ts` starts/stops token
+  auto-refresh from `AppState`; the web variant is a no-op because supabase-js already
+  reacts to `visibilitychange`. The deprecated `lock` option is not used.
 - **Startup.** The root screen renders nothing until the stored session is resolved, so guest
   tasks never flash before an account view. A failed restoration (typically offline with an
   expired token) offers retry or an explicit "continue as guest"; after that choice, late
@@ -170,9 +175,9 @@ Supabase Cloud only allows editing the email template with custom SMTP.) Consequ
   applied. A failed sign-in or a confirmation-required sign-up does not lift that guard.
   Nothing is deleted on auth failure.
 - **Guest tasks while signed in.** The signed-in view unmounts the guest list and composer and
-  shows the account-owned `tasks` list (ADR-015). `local_tasks` rows are neither copied,
-  uploaded, cleared nor re-owned; they reappear after sign-out. Adoption into the account-owned
-  synced table stays deferred exactly as ADR-011 describes. Sign-out uses `scope: 'local'` so
+  shows the account-owned `tasks` list (ADR-015). Remaining `local_tasks` are offered for
+  adoption (ADR-016); they are not uploaded ownerless or converted in place. Rows left
+  unadopted reappear after sign-out. Sign-out uses `scope: 'local'` so
   other devices keep their sessions, and local state becomes signed-out even if the revoke
   request fails.
 - **Server side.** This ADR covers the client auth boundary. The API verifies the same
@@ -226,7 +231,7 @@ to `POST /sync/upload`. The API applies a batch atomically in one Drizzle transa
   models `auth` (ADR-004). Referencing `auth` is not modifying it.
 - `scheduled_time` is stored as `time(0)` (`HH:mm:ss`). The wire also accepts `HH:mm`.
 - Client PowerSync schema includes `tasks` (mirrors `public.tasks` / `user_tasks`).
-  Guest-task adoption stays as ADR-011.
+  Guest-task adoption is ADR-016.
 
 ### ADR-015 Connector: Supabase session is the PowerSync credential
 
@@ -274,8 +279,23 @@ the token never reaches the UI or `AuthRepository`. Consequences:
   source. The UI keeps repository `subscribe()` + `useSyncExternalStore`;
   it does not use `@powersync/react`.
 
+### ADR-016 Guest-task adoption: one-time prompt, copy+delete in one local transaction
+
+When a signed-in user still has `local_tasks` on the device, prompt once: "You have N tasks
+from before you signed in." **Add to my account** copies each row into `tasks` with
+`user_id` and the same `id`, then deletes `local_tasks`, all in one `writeTransaction`
+(one `ps_crud` transaction → one atomic `/sync/upload` batch once a connector is
+connected). **Not now** hides the prompt until the next sign-in (in-memory skip; `reset()`
+on sign-out, and when the signed-in user id changes without a sign-out). **Don't ask
+again** writes `local_preferences` (`id = 'guest-task-adoption'`,
+`value = 'dismissed'`), a local-only table that survives `disconnectAndClear({
+clearLocal: false })`.
+
+The banner mounts only after local-data readiness (ADR-015) so adoption cannot write into
+a queue that is about to be cleared. Do not convert `local_tasks` in place or upload
+ownerless rows (ADR-011).
+
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,
-different command), attachments/Storage, password recovery and social login, guest-task
-adoption.
+different command), attachments/Storage, password recovery and social login.

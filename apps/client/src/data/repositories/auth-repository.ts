@@ -9,6 +9,7 @@ import {
   credentialsSchema,
   toAuthFailure,
 } from './auth';
+import type { AuthUrlError } from './auth-url';
 
 export type SignUpOutcome = 'confirmation-required' | 'signed-in';
 
@@ -54,6 +55,11 @@ export interface AuthRepositoryOptions {
   emailRedirectTo?: string;
   /** Native `Linking` listener; web is a no-op. */
   registerDeepLink?: RegisterAuthDeepLink;
+  /**
+   * Auth error captured from the page URL before supabase-js consumes it (web confirmation
+   * / recovery redirects). Native omits this; deep-link errors go through the callback exchange.
+   */
+  urlAuthError?: AuthUrlError | null;
 }
 
 export function createAuthRepository(
@@ -78,21 +84,28 @@ export function createAuthRepository(
   }
 
   function applySession(session: Session | null) {
-    if (session) guestOverride = false;
-    setState(
-      session ? { status: 'signed-in', user: toAuthUser(session) } : { status: 'signed-out' },
-    );
+    if (session) {
+      guestOverride = false;
+      setState({ status: 'signed-in', user: toAuthUser(session) });
+      return;
+    }
+    // A no-session event after restore already published `signed-out` must not drop
+    // `redirectError`. Real sign-out is `signed-in` → `signed-out`.
+    if (state.status === 'signed-out') return;
+    setState({ status: 'signed-out' });
   }
 
   // Covers sign-ins from `_recoverAndRefresh`, token refreshes, and revoked sessions.
-  // `INITIAL_SESSION` is intentionally ignored: `restoreSession` owns startup.
+  // Startup (`INITIAL_SESSION`, and `SIGNED_OUT` while restoring / restore-failed) is
+  // ignored: `restoreSession` owns the first terminal state, including `redirectError`.
   const { data: authListener } = auth.onAuthStateChange((event, session) => {
+    if (event === 'INITIAL_SESSION' || guestOverride) return;
+    if (state.status === 'restoring' || state.status === 'restore-failed') return;
     if (event === 'SIGNED_OUT') {
-      if (!guestOverride) applySession(null);
+      applySession(null);
       return;
     }
-    if (event === 'INITIAL_SESSION' || !session || guestOverride) return;
-    if (state.status === 'restoring' || state.status === 'restore-failed') return;
+    if (!session) return;
     applySession(session);
   });
   const unregisterLifecycle = registerLifecycle(auth);
@@ -106,9 +119,17 @@ export function createAuthRepository(
       try {
         const { data, error } = await auth.getSession();
         if (error) throw error;
-        if (generation === restorationGeneration && !authCallbackInFlight) {
+        if (generation !== restorationGeneration || authCallbackInFlight) return;
+        if (data.session) {
           applySession(data.session);
+          return;
         }
+        const redirectError = options.urlAuthError
+          ? toAuthFailure(options.urlAuthError)
+          : undefined;
+        setState(
+          redirectError ? { status: 'signed-out', redirectError } : { status: 'signed-out' },
+        );
       } catch (error) {
         if (generation === restorationGeneration && !authCallbackInFlight) {
           setState({ status: 'restore-failed', error: toAuthFailure(error) });

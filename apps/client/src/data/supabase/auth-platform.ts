@@ -19,6 +19,11 @@ export interface AuthPlatformOptions {
   flowType?: 'pkce' | 'implicit';
   /** Native confirmation emails redirect here. Omitted on web (Site URL + `detectSessionInUrl`). */
   emailRedirectTo?: string;
+  /**
+   * Current page URL so confirmation/recovery error params can be parsed before
+   * supabase-js consumes them. Web only; native deep-link errors go through the callback exchange.
+   */
+  getLocationHref?: () => string;
 }
 
 export const authPlatformOptions: AuthPlatformOptions = {
