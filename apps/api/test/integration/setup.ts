@@ -80,9 +80,22 @@ export async function upload(
   });
 }
 
+/** Postgres timestamptz string → ISO-8601 Instant (e.g. ...T15:00:00.000Z). */
+function toIsoInstant(value: string): string {
+  return new Date(value).toISOString();
+}
+
 export async function loadTask(id: string) {
   const [row] = await database.db.select().from(schema.tasks).where(eq(schema.tasks.id, id));
-  return row ?? null;
+  if (!row) return null;
+  // Drizzle mode:'string' returns driver text like '2026-09-11 15:00:00+00'.
+  // Normalize to ISO so assertions compare Instant equality, not wire form.
+  return {
+    ...row,
+    completedAt: row.completedAt == null ? null : toIsoInstant(row.completedAt),
+    createdAt: toIsoInstant(row.createdAt),
+    updatedAt: toIsoInstant(row.updatedAt),
+  };
 }
 
 beforeAll(async () => {
