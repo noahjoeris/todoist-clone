@@ -206,6 +206,10 @@ to `POST /sync/upload`. The API applies a batch atomically in one Drizzle transa
 - **PATCH / DELETE** of a missing row is a no-op (still 200, `applied = operations.length`).
   PATCH/DELETE of another user's row is 403. A PATCH whose only keys were server-owned
   is a no-op after strip.
+- PATCH `scheduled_date` / `scheduled_time` is validated against the merged persisted
+  row, not the partial payload. Clearing the date also clears a leftover time. A
+  time-only patch on a dated row is allowed. An explicit time without a date is
+  400 `invalid-request`.
 - Any 403 rolls back the whole batch, including earlier PUTs in that request.
 - **Connector (next PR):** 2xx / 4xx → `complete()` the PowerSync transaction (4xx is a
   client bug or abuse; the SQLite batch is discarded). 5xx / network → retry.
@@ -214,9 +218,8 @@ to `POST /sync/upload`. The API applies a batch atomically in one Drizzle transa
   `tasks.user_id → auth.users(id) ON DELETE CASCADE` is raw SQL so drizzle-kit never
   models `auth` (ADR-004). Referencing `auth` is not modifying it.
 - `scheduled_time` is stored as `time(0)` (`HH:mm:ss`). The wire also accepts `HH:mm`.
-- Client PowerSync table + connector are deferred. That is an explicit waiver of the
-  AGENTS.md rule that a synced table ships with migration, Sync Stream, and client
-  schema together. Guest-task adoption stays as ADR-011.
+- Client PowerSync schema includes `tasks` (mirrors `public.tasks` / `user_tasks`).
+  The backend connector is still deferred. Guest-task adoption stays as ADR-011.
 
 ## Deferred
 

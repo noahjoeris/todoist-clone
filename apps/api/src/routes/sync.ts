@@ -1,6 +1,6 @@
 import { uploadRequestSchema, uploadResponseSchema } from '@todoist-clone/contracts';
 import type { FastifyPluginAsync } from 'fastify';
-import { applyUpload, ForbiddenError } from '../sync/apply-upload.js';
+import { applyUpload, ForbiddenError, InvalidRequestError } from '../sync/apply-upload.js';
 
 /**
  * PowerSync backend connector contract (ADR-014):
@@ -32,6 +32,9 @@ export const syncRoutes: FastifyPluginAsync = async (app) => {
     } catch (error) {
       if (error instanceof ForbiddenError) {
         return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (error instanceof InvalidRequestError) {
+        return reply.code(400).send({ error: 'invalid-request', issues: error.issues });
       }
       throw error;
     }

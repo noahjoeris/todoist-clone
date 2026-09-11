@@ -1,4 +1,8 @@
-import type { CrudEntry, TaskPatchColumns } from '@todoist-clone/contracts';
+import {
+  type CrudEntry,
+  mergeScheduledColumns,
+  type TaskPatchColumns,
+} from '@todoist-clone/contracts';
 import { and, type Database, eq, schema, sql } from '@todoist-clone/database';
 
 const { tasks } = schema;
@@ -9,6 +13,17 @@ export class ForbiddenError extends Error {
   constructor() {
     super('forbidden');
     this.name = 'ForbiddenError';
+  }
+}
+
+export class InvalidRequestError extends Error {
+  readonly code = 'invalid-request' as const;
+  readonly issues: { path: string; message: string }[];
+
+  constructor(issues: { path: string; message: string }[]) {
+    super('invalid-request');
+    this.name = 'InvalidRequestError';
+    this.issues = issues;
   }
 }
 
@@ -78,7 +93,12 @@ async function applyPatch(
   userId: string,
   operation: Extract<CrudEntry, { op: 'PATCH' }>,
 ): Promise<void> {
-  const set = patchSet(operation.opData);
+  const opData = await mergeSchedulePatch(tx, userId, operation);
+  if (opData === null) {
+    return;
+  }
+
+  const set = patchSet(opData);
   if (set === null) {
     return;
   }
@@ -92,6 +112,54 @@ async function applyPatch(
   if (updated.length === 0) {
     await assertMissingOrOwned(tx, operation.id, userId);
   }
+}
+
+/** Date/time are coupled; validate the merged stored row, not the partial patch. */
+async function mergeSchedulePatch(
+  tx: UploadExecutor,
+  userId: string,
+  operation: Extract<CrudEntry, { op: 'PATCH' }>,
+): Promise<TaskPatchColumns | null> {
+  const { opData } = operation;
+  if (opData.scheduled_date === undefined && opData.scheduled_time === undefined) {
+    return opData;
+  }
+
+  const [existing] = await tx
+    .select({
+      userId: tasks.userId,
+      scheduledDate: tasks.scheduledDate,
+      scheduledTime: tasks.scheduledTime,
+    })
+    .from(tasks)
+    .where(eq(tasks.id, operation.id))
+    .limit(1);
+
+  if (!existing) {
+    return null;
+  }
+  if (existing.userId !== userId) {
+    throw new ForbiddenError();
+  }
+
+  const merged = mergeScheduledColumns(
+    {
+      scheduled_date: existing.scheduledDate ?? null,
+      scheduled_time: existing.scheduledTime ?? null,
+    },
+    opData,
+  );
+  if (!merged.ok) {
+    throw new InvalidRequestError([
+      { path: 'scheduled_time', message: 'scheduled_time requires scheduled_date' },
+    ]);
+  }
+
+  return {
+    ...opData,
+    scheduled_date: merged.scheduled_date,
+    scheduled_time: merged.scheduled_time,
+  };
 }
 
 async function applyDelete(

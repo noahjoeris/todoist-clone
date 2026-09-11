@@ -5,7 +5,7 @@ import {
   schema,
   sql,
 } from '@todoist-clone/database';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import {
   type CryptoKey,
   createLocalJWKSet,
@@ -67,7 +67,11 @@ export async function sign(subject: string): Promise<string> {
     .sign(privateKey);
 }
 
-export async function upload(subject: string, operations: unknown[], transactionId?: number) {
+export async function upload(
+  subject: string,
+  operations: unknown[],
+  transactionId?: number,
+): Promise<LightMyRequestResponse> {
   return app.inject({
     method: 'POST',
     url: '/sync/upload',

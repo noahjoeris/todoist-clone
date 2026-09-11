@@ -131,6 +131,63 @@ describe('POST /sync/upload (integration)', () => {
     expect(response.json().error).toBe('invalid-request');
   });
 
+  it('PATCH of only scheduled_time on a dated row succeeds', async () => {
+    await upload(OWNER_ID, [
+      putOp(OWN_ID, { scheduled_date: '2026-09-11', scheduled_time: '09:00' }),
+    ]);
+
+    const response = await upload(OWNER_ID, [
+      {
+        clientId: 2,
+        op: 'PATCH',
+        table: 'tasks',
+        id: OWN_ID,
+        opData: { scheduled_time: '10:30' },
+      },
+    ]);
+    expect(response.statusCode).toBe(200);
+    const row = await loadTask(OWN_ID);
+    expect(row?.scheduledDate).toBe('2026-09-11');
+    expect(row?.scheduledTime?.startsWith('10:30')).toBe(true);
+  });
+
+  it('PATCH that clears scheduled_date also clears a leftover scheduled_time', async () => {
+    await upload(OWNER_ID, [
+      putOp(OWN_ID, { scheduled_date: '2026-09-11', scheduled_time: '09:00' }),
+    ]);
+
+    const response = await upload(OWNER_ID, [
+      {
+        clientId: 2,
+        op: 'PATCH',
+        table: 'tasks',
+        id: OWN_ID,
+        opData: { scheduled_date: null },
+      },
+    ]);
+    expect(response.statusCode).toBe(200);
+    const row = await loadTask(OWN_ID);
+    expect(row?.scheduledDate).toBeNull();
+    expect(row?.scheduledTime).toBeNull();
+  });
+
+  it('PATCH of scheduled_time onto a dateless row is 400', async () => {
+    await upload(OWNER_ID, [putOp(OWN_ID)]);
+
+    const response = await upload(OWNER_ID, [
+      {
+        clientId: 2,
+        op: 'PATCH',
+        table: 'tasks',
+        id: OWN_ID,
+        opData: { scheduled_time: '09:00' },
+      },
+    ]);
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe('invalid-request');
+    expect((await loadTask(OWN_ID))?.scheduledTime).toBeNull();
+  });
+
   it('ignores PATCH user_id and treats an empty-after-strip patch as a no-op', async () => {
     await upload(OWNER_ID, [putOp(OWN_ID, { title: 'Stay' })]);
     const response = await upload(OWNER_ID, [

@@ -16,7 +16,8 @@ import { createSupabaseClient } from './supabase/client';
  * hand repositories the `powersync` instance; UI code should not import this directly.
  *
  * `powersync.connect(...)` is intentionally not called yet: the backend connector
- * (auth token + upload queue handler) arrives together with the first synced table.
+ * (auth token + upload queue handler) arrives in a later change. The `tasks` table
+ * is already in the client schema so downloaded rows can materialize once connected.
  */
 export interface DataSystem {
   powersync: CommonPowerSyncDatabase;

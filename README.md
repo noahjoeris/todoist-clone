@@ -61,6 +61,7 @@ cd infra/supabase && cp .env.example .env && sh utils/generate-keys.sh && sh uti
 git checkout -- infra/supabase/docker-compose.yml   # overlay sets GOTRUE_JWT_KEYS; do not keep vendored edits
 pnpm infra:up                     # Supabase + PowerSync + API, waits for health checks
 pnpm infra:powersync:bootstrap    # replication role + publication in the Supabase DB
+pnpm db:migrate                   # creates public.tasks and adds it to the publication
 ```
 
 Studio: http://localhost:8000 · API gateway: http://localhost:8000 · PowerSync: http://localhost:8080 · API: http://localhost:3000.

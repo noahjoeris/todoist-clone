@@ -11,6 +11,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
 import { loadEnv } from '../config/env.js';
+import { InvalidRequestError } from '../sync/apply-upload.js';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const TASK_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -81,6 +82,59 @@ describe('POST /sync/upload', () => {
     expect(response.statusCode).toBe(400);
     expect(response.json().error).toBe('invalid-request');
     expect(response.json().issues.length).toBeGreaterThan(0);
+  });
+
+  it('returns 400 when merged date/time is invalid', async () => {
+    const database = {
+      db: {
+        transaction: async () => {
+          throw new InvalidRequestError([
+            { path: 'scheduled_time', message: 'scheduled_time requires scheduled_date' },
+          ]);
+        },
+      },
+      close: async () => {},
+    } as unknown as DatabaseConnection;
+
+    const invalidApp = await buildApp({
+      env: loadEnv(testEnv),
+      version: '0.0.0',
+      logger: false,
+      getKey,
+      database,
+    });
+    await invalidApp.ready();
+
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: 'ES256', kid: 'key-1' })
+      .setAudience('authenticated')
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .setSubject(USER_ID)
+      .sign(privateKey);
+
+    const response = await invalidApp.inject({
+      method: 'POST',
+      url: '/sync/upload',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        operations: [
+          {
+            clientId: 2,
+            op: 'PATCH',
+            table: 'tasks',
+            id: TASK_ID,
+            opData: { title: 'Keep' },
+          },
+        ],
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: 'invalid-request',
+      issues: [{ path: 'scheduled_time', message: 'scheduled_time requires scheduled_date' }],
+    });
+    await invalidApp.close();
   });
 
   it('returns 400 for an unknown table', async () => {

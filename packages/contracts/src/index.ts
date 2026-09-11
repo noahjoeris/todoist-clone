@@ -10,6 +10,8 @@ export { type MeResponse, meResponseSchema } from './me.js';
 export {
   type CrudEntry,
   crudEntrySchema,
+  mergeScheduledColumns,
+  type ScheduledColumns,
   type TaskColumns,
   type TaskPatchColumns,
   taskColumnsSchema,

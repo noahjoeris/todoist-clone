@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   crudEntrySchema,
+  mergeScheduledColumns,
   taskColumnsSchema,
   taskPatchColumnsSchema,
   uploadErrorSchema,
@@ -98,6 +99,57 @@ describe('taskPatchColumnsSchema', () => {
     expect(
       taskPatchColumnsSchema.safeParse({ scheduled_date: null, scheduled_time: '09:00' }).success,
     ).toBe(false);
+  });
+
+  it('accepts a time-only patch; the stored date is merged later', () => {
+    expect(taskPatchColumnsSchema.parse({ scheduled_time: '09:00' })).toEqual({
+      scheduled_time: '09:00',
+    });
+  });
+
+  it('accepts clearing the date without sending time', () => {
+    expect(taskPatchColumnsSchema.parse({ scheduled_date: null })).toEqual({
+      scheduled_date: null,
+    });
+  });
+});
+
+describe('mergeScheduledColumns', () => {
+  const dated = { scheduled_date: '2026-09-11', scheduled_time: '09:00' };
+  const dateless = { scheduled_date: null, scheduled_time: null };
+
+  it('keeps the stored date when only time changes', () => {
+    expect(mergeScheduledColumns(dated, { scheduled_time: '10:30' })).toEqual({
+      ok: true,
+      scheduled_date: '2026-09-11',
+      scheduled_time: '10:30',
+    });
+  });
+
+  it('drops a leftover time when the date is cleared', () => {
+    expect(mergeScheduledColumns(dated, { scheduled_date: null })).toEqual({
+      ok: true,
+      scheduled_date: null,
+      scheduled_time: null,
+    });
+  });
+
+  it('rejects setting a time on a dateless row', () => {
+    expect(mergeScheduledColumns(dateless, { scheduled_time: '09:00' })).toEqual({ ok: false });
+  });
+
+  it('rejects an explicit time together with a null date', () => {
+    expect(mergeScheduledColumns(dated, { scheduled_date: null, scheduled_time: '10:30' })).toEqual(
+      { ok: false },
+    );
+  });
+
+  it('clears both when the patch sends nulls', () => {
+    expect(mergeScheduledColumns(dated, { scheduled_date: null, scheduled_time: null })).toEqual({
+      ok: true,
+      scheduled_date: null,
+      scheduled_time: null,
+    });
   });
 });
 
