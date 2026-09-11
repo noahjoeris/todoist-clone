@@ -35,9 +35,30 @@ describe('guest-task adoption', () => {
         id TEXT PRIMARY KEY, title TEXT, description TEXT, priority INTEGER,
         scheduled_date TEXT, scheduled_time TEXT, created_at TEXT
       );
-      CREATE TABLE local_preferences (
-        id TEXT PRIMARY KEY, value TEXT
+      CREATE TABLE ps_data_local__local_preferences (
+        id TEXT NOT NULL PRIMARY KEY,
+        data TEXT
       );
+      CREATE VIEW local_preferences AS
+        SELECT id, CAST(json_extract(data, '$.value') AS TEXT) AS value
+        FROM ps_data_local__local_preferences;
+      CREATE TRIGGER ps_view_insert_local_preferences
+        INSTEAD OF INSERT ON local_preferences
+      BEGIN
+        INSERT OR REPLACE INTO ps_data_local__local_preferences (id, data)
+        VALUES (NEW.id, json_object('value', NEW.value));
+      END;
+      CREATE TRIGGER ps_view_update_local_preferences
+        INSTEAD OF UPDATE ON local_preferences
+      BEGIN
+        INSERT OR REPLACE INTO ps_data_local__local_preferences (id, data)
+        VALUES (NEW.id, json_object('value', NEW.value));
+      END;
+      CREATE TRIGGER ps_view_delete_local_preferences
+        INSTEAD OF DELETE ON local_preferences
+      BEGIN
+        DELETE FROM ps_data_local__local_preferences WHERE id = OLD.id;
+      END;
       CREATE TABLE tasks (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, description TEXT, priority INTEGER,
         scheduled_date TEXT, scheduled_time TEXT, created_at TEXT, updated_at TEXT
@@ -136,6 +157,7 @@ describe('guest-task adoption', () => {
     const copied = await repository.adopt(USER_ID);
 
     expect(copied).toBe(2);
+    expect(writeTransaction).toHaveBeenCalledOnce();
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM local_tasks').get()).toEqual({ count: 0 });
     expect(repository.getState()).toEqual({ status: 'hidden' });
 
@@ -201,6 +223,16 @@ describe('guest-task adoption', () => {
   it('persists dismiss in local_preferences', async () => {
     insertLocalTask({ id: TASK_A, title: 'Later' });
     const repository = await createRepository();
+
+    expect(() =>
+      sqlite
+        .prepare(
+          `INSERT INTO local_preferences (id, value) VALUES (?, ?)
+           ON CONFLICT(id) DO UPDATE SET value = excluded.value`,
+        )
+        .run(GUEST_TASK_ADOPTION_PREF_ID, GUEST_TASK_ADOPTION_DISMISSED),
+    ).toThrow(/cannot UPSERT a view/i);
+
     await repository.dismissForever();
 
     expect(repository.getState()).toEqual({ status: 'hidden' });
@@ -212,6 +244,11 @@ describe('guest-task adoption', () => {
     expect(again.getState()).toEqual({ status: 'hidden' });
     again.reset();
     expect(again.getState()).toEqual({ status: 'hidden' });
+
+    await again.dismissForever();
+    expect(sqlite.prepare('SELECT id, value FROM local_preferences').all()).toEqual([
+      { id: GUEST_TASK_ADOPTION_PREF_ID, value: GUEST_TASK_ADOPTION_DISMISSED },
+    ]);
   });
 
   it('treats skip as session-only and re-offers after reset', async () => {

@@ -135,11 +135,12 @@ export function createGuestTaskAdoptionRepository(
     },
 
     async dismissForever() {
-      await database.execute(
-        `INSERT INTO local_preferences (id, value) VALUES (?, ?)
-         ON CONFLICT(id) DO UPDATE SET value = excluded.value`,
-        [GUEST_TASK_ADOPTION_PREF_ID, GUEST_TASK_ADOPTION_DISMISSED],
-      );
+      // PowerSync tables are views with INSTEAD OF triggers; SQLite rejects
+      // INSERT … ON CONFLICT DO UPDATE on views (`cannot UPSERT a view`).
+      await database.execute('INSERT OR REPLACE INTO local_preferences (id, value) VALUES (?, ?)', [
+        GUEST_TASK_ADOPTION_PREF_ID,
+        GUEST_TASK_ADOPTION_DISMISSED,
+      ]);
       dismissed = true;
       notify();
     },
