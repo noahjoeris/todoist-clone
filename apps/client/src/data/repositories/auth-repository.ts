@@ -73,21 +73,28 @@ export function createAuthRepository(
   }
 
   function applySession(session: Session | null) {
-    if (session) guestOverride = false;
-    setState(
-      session ? { status: 'signed-in', user: toAuthUser(session) } : { status: 'signed-out' },
-    );
+    if (session) {
+      guestOverride = false;
+      setState({ status: 'signed-in', user: toAuthUser(session) });
+      return;
+    }
+    // A no-session event after restore already published `signed-out` must not drop
+    // `redirectError`. Real sign-out is `signed-in` → `signed-out`.
+    if (state.status === 'signed-out') return;
+    setState({ status: 'signed-out' });
   }
 
   // Covers sign-ins from `_recoverAndRefresh`, token refreshes, and revoked sessions.
-  // `INITIAL_SESSION` is intentionally ignored: `restoreSession` owns startup.
+  // Startup (`INITIAL_SESSION`, and `SIGNED_OUT` while restoring / restore-failed) is
+  // ignored: `restoreSession` owns the first terminal state, including `redirectError`.
   const { data: authListener } = auth.onAuthStateChange((event, session) => {
+    if (event === 'INITIAL_SESSION' || guestOverride) return;
+    if (state.status === 'restoring' || state.status === 'restore-failed') return;
     if (event === 'SIGNED_OUT') {
-      if (!guestOverride) applySession(null);
+      applySession(null);
       return;
     }
-    if (event === 'INITIAL_SESSION' || !session || guestOverride) return;
-    if (state.status === 'restoring' || state.status === 'restore-failed') return;
+    if (!session) return;
     applySession(session);
   });
   const unregisterLifecycle = registerLifecycle(auth);

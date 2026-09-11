@@ -116,6 +116,28 @@ describe('auth repository', () => {
       });
     });
 
+    it('attaches a URL redirect error even if SIGNED_OUT fires during getSession', async () => {
+      const pending = deferred<{ data: { session: Session | null }; error: null }>();
+      auth.getSession.mockReturnValue(pending.promise);
+      const urlAuthError = new AuthUrlError('otp_expired', 'Email link is invalid or has expired');
+      const repository = createAuthRepository(auth, registerLifecycle, { urlAuthError });
+      const restoration = repository.restoreSession();
+
+      emitAuthEvent('SIGNED_OUT', null);
+      expect(repository.getState()).toEqual({ status: 'restoring' });
+
+      pending.resolve({ data: { session: null }, error: null });
+      await restoration;
+
+      const state = repository.getState();
+      expect(state.status).toBe('signed-out');
+      if (state.status !== 'signed-out') throw new Error('expected signed-out');
+      expect(state.redirectError).toMatchObject({
+        code: 'otp-expired',
+        message: 'This link has expired. Request a new one and try again.',
+      });
+    });
+
     it('ignores a URL redirect error when a session is restored', async () => {
       auth.getSession.mockResolvedValue({ data: { session: session() }, error: null });
       const repository = createAuthRepository(auth, registerLifecycle, {
@@ -419,11 +441,27 @@ describe('auth repository', () => {
 
       emitAuthEvent('INITIAL_SESSION', session());
       emitAuthEvent('SIGNED_IN', session());
+      emitAuthEvent('SIGNED_OUT', null);
       expect(repository.getState()).toEqual({ status: 'restoring' });
 
       pending.resolve({ data: { session: null }, error: null });
       await restoration;
       expect(repository.getState()).toEqual({ status: 'signed-out' });
+    });
+
+    it('keeps a redirectError if SIGNED_OUT arrives after a no-session restore', async () => {
+      auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+      const repository = createAuthRepository(auth, registerLifecycle, {
+        urlAuthError: new AuthUrlError('otp_expired', 'expired'),
+      });
+      await repository.restoreSession();
+
+      emitAuthEvent('SIGNED_OUT', null);
+
+      const state = repository.getState();
+      expect(state.status).toBe('signed-out');
+      if (state.status !== 'signed-out') throw new Error('expected signed-out');
+      expect(state.redirectError).toMatchObject({ code: 'otp-expired' });
     });
   });
 
