@@ -1,5 +1,6 @@
 import { isAuthError, isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { AuthUrlError } from './auth-url';
 
 /** What the UI may know about the signed-in user. Sessions and tokens stay in the data layer. */
 export interface AuthUser {
@@ -12,11 +13,13 @@ export interface AuthUser {
  *   never flash before an account view.
  * - `restore-failed`: the stored session could not be resolved (typically offline with an
  *   expired token). The user can retry or explicitly continue as guest.
+ * - `signed-out.redirectError`: a confirmation/recovery redirect failed (e.g. expired
+ *   OTP). Present only on the first signed-out state after restore so the UI can show it.
  */
 export type AuthState =
   | { status: 'restoring' }
   | { status: 'restore-failed'; error: AuthFailure }
-  | { status: 'signed-out' }
+  | { status: 'signed-out'; redirectError?: AuthFailure }
   | { status: 'signed-in'; user: AuthUser };
 
 // Supabase's default minimum password length.
@@ -41,6 +44,7 @@ export type AuthFailureCode =
   | 'email-not-confirmed'
   | 'email-taken'
   | 'weak-password'
+  | 'otp-expired'
   | 'rate-limited'
   | 'network'
   | 'unknown';
@@ -67,6 +71,7 @@ const DEFAULT_MESSAGES: Record<AuthFailureCode, string> = {
   'email-not-confirmed': 'Confirm your email address to sign in.',
   'email-taken': 'An account with this email already exists. Sign in instead.',
   'weak-password': `Use at least ${MIN_PASSWORD_LENGTH} characters.`,
+  'otp-expired': 'This link has expired. Request a new one and try again.',
   'rate-limited': 'Too many attempts. Wait a moment and try again.',
   network: 'Couldn’t reach the server. Check your connection and try again.',
   unknown: 'Something went wrong. Try again.',
@@ -79,6 +84,8 @@ const SUPABASE_ERROR_CODES: Record<string, AuthFailureCode> = {
   user_already_exists: 'email-taken',
   email_exists: 'email-taken',
   weak_password: 'weak-password',
+  otp_expired: 'otp-expired',
+  'otp-expired': 'otp-expired',
   over_request_rate_limit: 'rate-limited',
   over_email_send_rate_limit: 'rate-limited',
   validation_failed: 'invalid-input',
@@ -94,6 +101,9 @@ export function toAuthFailure(error: unknown): AuthFailure {
   if (error instanceof z.ZodError) {
     return new AuthFailure('invalid-input', error.issues[0]?.message, { cause: error });
   }
+  if (error instanceof AuthUrlError) {
+    return mapSupabaseCode(error.code, error.message, error);
+  }
   if (isAuthRetryableFetchError(error)) {
     return new AuthFailure('network', undefined, { cause: error });
   }
@@ -107,4 +117,16 @@ export function toAuthFailure(error: unknown): AuthFailure {
     if (error.status === 429) return new AuthFailure('rate-limited', undefined, { cause: error });
   }
   return new AuthFailure('unknown', undefined, { cause: error });
+}
+
+function mapSupabaseCode(
+  supabaseCode: string | undefined,
+  message: string | undefined,
+  cause: unknown,
+): AuthFailure {
+  const code = supabaseCode ? SUPABASE_ERROR_CODES[supabaseCode] : undefined;
+  if (code) {
+    return new AuthFailure(code, RELAY_SERVER_MESSAGE.has(code) ? message : undefined, { cause });
+  }
+  return new AuthFailure('unknown', undefined, { cause });
 }
