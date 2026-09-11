@@ -7,7 +7,7 @@ import { column, Schema, Table } from '@powersync/common';
  * device-owned and need neither. PowerSync adds the text `id` column itself.
  */
 // Guest tasks stay on this device and never enter the upload queue. Adoption
-// copies them into `tasks` later (ADR-011); this table is not converted in place.
+// copies them into `tasks` (ADR-016); this table is not converted in place.
 const localTasks = new Table(
   {
     title: column.text,
@@ -19,6 +19,10 @@ const localTasks = new Table(
   },
   { localOnly: true },
 );
+
+// Device-level flags such as "don't ask again" for guest-task adoption (ADR-016).
+// Survives disconnectAndClear({ clearLocal: false }). Key is the PowerSync `id`.
+const localPreferences = new Table({ value: column.text }, { localOnly: true });
 
 // Account-owned rows. Mirrors public.tasks and the user_tasks Sync Stream.
 const tasks = new Table({
@@ -32,6 +36,10 @@ const tasks = new Table({
   updated_at: column.text,
 });
 
-export const appSchema = new Schema({ local_tasks: localTasks, tasks });
+export const appSchema = new Schema({
+  local_tasks: localTasks,
+  local_preferences: localPreferences,
+  tasks,
+});
 
 export type AppDatabaseTypes = (typeof appSchema)['types'];
