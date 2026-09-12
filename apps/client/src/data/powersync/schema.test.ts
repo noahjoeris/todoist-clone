@@ -20,6 +20,7 @@ describe('appSchema', () => {
     expect(appSchema.props.tasks.localOnly).toBe(false);
     expect(appSchema.props.tasks.columns.map((column) => column.name)).toEqual([
       'user_id',
+      'project_id',
       'title',
       'description',
       'priority',
@@ -44,6 +45,17 @@ describe('appSchema', () => {
       'task_id',
       'label_id',
       'created_at',
+    ]);
+    expect(appSchema.props.projects.localOnly).toBe(false);
+    expect(appSchema.props.projects.columns.map((column) => column.name)).toEqual([
+      'user_id',
+      'name',
+      'color',
+      'is_favorite',
+      'sort_order',
+      'is_archived',
+      'created_at',
+      'updated_at',
     ]);
   });
 });

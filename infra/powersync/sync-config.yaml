@@ -22,3 +22,6 @@ streams:
   user_task_labels:
     auto_subscribe: true
     query: SELECT * FROM task_labels WHERE user_id = auth.user_id()
+  user_projects:
+    auto_subscribe: true
+    query: SELECT * FROM projects WHERE user_id = auth.user_id()
