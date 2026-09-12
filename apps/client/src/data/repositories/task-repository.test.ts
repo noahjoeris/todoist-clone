@@ -858,6 +858,15 @@ describe('task view queries', () => {
     expect(String(watch.mock.calls[1]?.[0])).not.toMatch(/project_id/);
   });
 
+  it('watches a guest task by id without treating other rows as a miss', () => {
+    insertLocal(sqlite, { id: 'u', title: 'Unscheduled' });
+    const onTask = vi.fn();
+    repository.subscribeById('u', onTask, vi.fn());
+    expect(onTask.mock.calls[0]?.[0]).toMatchObject({ id: 'u', title: 'Unscheduled' });
+    repository.subscribeById('missing', onTask, vi.fn());
+    expect(onTask.mock.calls.at(-1)?.[0]).toBeNull();
+  });
+
   it('returns no guest tasks for a project destination', () => {
     insertLocal(sqlite, { id: 'u', title: 'Unscheduled' });
     expect(
@@ -1363,6 +1372,42 @@ describe('account-owned task projects', () => {
     expect(onTasks.mock.calls.at(-1)?.[0][0]).toMatchObject({
       project: { id: PROJECT_WORK, name: 'Office', color: 'red' },
     });
+  });
+
+  it('keeps a by-id watch after the task leaves the current view', async () => {
+    await repositories.forUser(USER_A).create({ title: 'Inbox' });
+    const id = loadId(sqlite, 'tasks');
+    const onTask = vi.fn();
+    repositories.forUser(USER_A).subscribeById(id, onTask, vi.fn());
+    expect(onTask.mock.calls[0]?.[0]).toMatchObject({ id, title: 'Inbox', projectId: null });
+
+    sqlite.prepare('UPDATE tasks SET project_id = ? WHERE id = ?').run(PROJECT_WORK, id);
+    const sql = String(watch.mock.calls[0]?.[0]);
+    const parameters = watch.mock.calls[0]?.[1] as SQLInputValue[];
+    const array = sqlite.prepare(sql).all(...parameters);
+    watch.mock.calls[0]?.[2]?.onResult?.({
+      array,
+      *[Symbol.iterator]() {
+        yield* array;
+        return undefined;
+      },
+    });
+    expect(onTask.mock.calls.at(-1)?.[0]).toMatchObject({
+      id,
+      title: 'Inbox',
+      projectId: PROJECT_WORK,
+    });
+
+    sqlite.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+    const gone = sqlite.prepare(sql).all(...parameters);
+    watch.mock.calls[0]?.[2]?.onResult?.({
+      array: gone,
+      *[Symbol.iterator]() {
+        yield* gone;
+        return undefined;
+      },
+    });
+    expect(onTask.mock.calls.at(-1)?.[0]).toBeNull();
   });
 
   it('restores membership only when the owned project still exists', async () => {

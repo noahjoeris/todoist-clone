@@ -40,6 +40,7 @@ import { TaskEditor } from '../components/TaskEditor';
 import { TaskList, type TaskSection } from '../components/TaskList';
 import { TaskRow } from '../components/TaskRow';
 import { dateLabel, upcomingBounds } from '../components/task-date';
+import { resolveOpenEditorTask } from '../components/task-editor';
 import { UndoBanner } from '../components/UndoBanner';
 import { confirmDiscard } from '../discard-draft';
 import {
@@ -50,10 +51,21 @@ import {
   requestDrawerClose,
   requestDrawerOpen,
 } from '../drawer-presence';
-import { type HomePane, isSamePane, isTaskListPane, taskDestinationOf } from '../home-pane';
+import {
+  type HomePane,
+  isSamePane,
+  isTaskListPane,
+  taskDestinationOf,
+  viewedProjectIsMissing,
+} from '../home-pane';
 import { useCalendarToday } from '../hooks/useCalendarToday';
 import { useSyncStatus } from '../hooks/useSyncStatus';
-import { defaultComposerLabelIds, defaultComposerProjectId } from '../task-create-defaults';
+import { confirmLeaveDeletedProject } from '../leave-deleted-project';
+import {
+  defaultComposerLabelIds,
+  defaultComposerProjectId,
+  taskComposerInstanceKey,
+} from '../task-create-defaults';
 import { createTaskUndoController } from '../task-undo';
 import { groupTasksByScheduledDate, rescheduleInput, splitTodayGroups } from '../task-view-groups';
 import { colors } from '../theme';
@@ -147,6 +159,11 @@ export function HomeScreen({
   const [composer, setComposer] = useState<Composer>({ kind: 'closed' });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingBaseline, setEditingBaseline] = useState<string[]>([]);
+  const [watchedEditing, setWatchedEditing] = useState<{ id: string; task: Task | null } | null>(
+    null,
+  );
+  const heldEditingTaskRef = useRef<Task | null>(null);
+  const deletedProjectPromptRef = useRef<string | null>(null);
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -292,11 +309,18 @@ export function HomeScreen({
   }, [projects]);
 
   useEffect(() => {
-    if (pane.type !== 'project' || !projectsReady) return;
-    if (!projectItems.some((project) => project.id === pane.projectId)) {
-      onPaneChange({ type: 'inbox' });
+    if (editingId == null) {
+      setWatchedEditing(null);
+      heldEditingTaskRef.current = null;
+      return;
     }
-  }, [pane, projectsReady, projectItems, onPaneChange]);
+    const id = editingId;
+    return repository.subscribeById(
+      id,
+      (task) => setWatchedEditing({ id, task }),
+      () => setWatchedEditing({ id, task: null }),
+    );
+  }, [repository, editingId]);
 
   const registerDirtyCheck = useCallback((isDirty: () => boolean) => {
     dirtyCheckRef.current = isDirty;
@@ -313,12 +337,32 @@ export function HomeScreen({
     setPresence((state) => finishDrawerClose(state, generation));
   }, []);
 
-  function closeForms() {
+  const closeForms = useCallback(() => {
     setComposer({ kind: 'closed' });
     setEditingId(null);
     setEditingBaseline([]);
     setReschedulingId(null);
-  }
+    heldEditingTaskRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    const projectIds = projectItems.map((project) => project.id);
+    if (!viewedProjectIsMissing(pane, projectsReady, projectIds)) {
+      deletedProjectPromptRef.current = null;
+      return;
+    }
+    if (pane.type !== 'project') return;
+    if (deletedProjectPromptRef.current === pane.projectId) return;
+    deletedProjectPromptRef.current = pane.projectId;
+    void confirmLeaveDeletedProject({
+      isDirty: dirtyCheckRef.current(),
+      confirmDiscard,
+    }).then((decision) => {
+      if (decision === 'stay') return;
+      closeForms();
+      onPaneChange({ type: 'inbox' });
+    });
+  }, [pane, projectsReady, projectItems, onPaneChange, closeForms]);
 
   async function confirmLeave() {
     if (dirtyCheckRef.current()) {
@@ -344,6 +388,7 @@ export function HomeScreen({
 
   async function openTask(task: Task) {
     if (!(await confirmLeave())) return;
+    heldEditingTaskRef.current = task;
     setEditingId(task.id);
     setEditingBaseline(task.labels.map((label) => label.id));
   }
@@ -415,13 +460,21 @@ export function HomeScreen({
   }
 
   const wrappedAccount = wrapAccount(account, confirmLeave);
-  const editingTask =
+  const viewEditingTask =
     editingId == null
       ? null
       : (active.find((task) => task.id === editingId) ??
         completed.find((task) => task.id === editingId) ??
         null);
-  const editorMissing = editingId != null && editingTask == null;
+  const resolvedEditor = resolveOpenEditorTask({
+    editingId,
+    viewTask: viewEditingTask,
+    watched: watchedEditing,
+    heldTask: heldEditingTaskRef.current,
+  });
+  heldEditingTaskRef.current = resolvedEditor.hold;
+  const editingTask = resolvedEditor.task;
+  const editorMissing = resolvedEditor.missing;
   const composerDate = defaultComposerDate(composer, pane, today);
   const sections = buildSections(pane, active, today, addFromGroup);
   const emptyCopy =
@@ -493,7 +546,8 @@ export function HomeScreen({
           ) : pane.type === 'projects' && projects ? (
             <ProjectsScreen
               repository={projects}
-              startAdding={addingProject}
+              adding={addingProject}
+              onAddingChange={setAddingProject}
               onOpenProject={(projectId) => {
                 setAddingProject(false);
                 void selectPane({ type: 'project', projectId });
@@ -610,7 +664,7 @@ export function HomeScreen({
                     />
                   ) : composing ? (
                     <TaskComposer
-                      key={`${composer.kind}:${composerDate ?? 'none'}:${composerProjectId ?? 'inbox'}`}
+                      key={taskComposerInstanceKey(composer.kind, composerDate)}
                       initialDate={composerDate}
                       today={today}
                       registerDirtyCheck={registerDirtyCheck}

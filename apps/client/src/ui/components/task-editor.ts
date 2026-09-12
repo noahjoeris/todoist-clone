@@ -18,3 +18,22 @@ export function holdOpenEditorLabelIds(
 ): readonly string[] {
   return held ?? labelIdsFromTask(liveTask);
 }
+
+/**
+ * Resolve the open editor's task from a by-id watch, not the current view list.
+ * Leaving Inbox/label/project membership must not look like deletion; only a
+ * by-id miss for this editing id is missing.
+ */
+export function resolveOpenEditorTask<T extends { id: string }>(input: {
+  editingId: string | null;
+  viewTask: T | null;
+  watched: { id: string; task: T | null } | null;
+  heldTask: T | null;
+}): { task: T | null; missing: boolean; hold: T | null } {
+  if (input.editingId == null) return { task: null, missing: false, hold: null };
+  const watchMatches = input.watched?.id === input.editingId;
+  const live = watchMatches ? (input.watched?.task ?? null) : input.viewTask;
+  const task = live ?? input.heldTask;
+  const missing = watchMatches && input.watched?.task == null;
+  return { task, missing, hold: task };
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isSamePane, isTaskListPane, taskDestinationOf } from './home-pane';
+import { isSamePane, isTaskListPane, taskDestinationOf, viewedProjectIsMissing } from './home-pane';
 
 describe('home pane', () => {
   it('treats project ids as distinct panes', () => {
@@ -24,5 +24,12 @@ describe('home pane', () => {
     expect(isTaskListPane({ type: 'project', projectId: 'a' })).toBe(true);
     expect(isTaskListPane({ type: 'labels' })).toBe(false);
     expect(isTaskListPane({ type: 'projects' })).toBe(false);
+  });
+
+  it('detects a catalog drop of the open project only after the catalog is ready', () => {
+    expect(viewedProjectIsMissing({ type: 'project', projectId: 'a' }, false, [])).toBe(false);
+    expect(viewedProjectIsMissing({ type: 'project', projectId: 'a' }, true, ['a'])).toBe(false);
+    expect(viewedProjectIsMissing({ type: 'project', projectId: 'a' }, true, ['b'])).toBe(true);
+    expect(viewedProjectIsMissing({ type: 'inbox' }, true, [])).toBe(false);
   });
 });

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { defaultComposerLabelIds, defaultComposerProjectId } from './task-create-defaults';
+import {
+  defaultComposerLabelIds,
+  defaultComposerProjectId,
+  taskComposerInstanceKey,
+} from './task-create-defaults';
 
 describe('task create defaults', () => {
   it('uses the active project only when adding from that project view', () => {
@@ -15,5 +19,11 @@ describe('task create defaults', () => {
     expect(defaultComposerLabelIds('view', { type: 'label', labelId: 'l1' })).toEqual(['l1']);
     expect(defaultComposerLabelIds('global', { type: 'label', labelId: 'l1' })).toBeUndefined();
     expect(defaultComposerLabelIds('view', { type: 'project', projectId: 'p1' })).toBeUndefined();
+  });
+
+  it('does not remount the composer when the viewed project changes', () => {
+    expect(taskComposerInstanceKey('view', null)).toBe('view:none');
+    expect(taskComposerInstanceKey('view', '2026-09-12')).toBe('view:2026-09-12');
+    expect(taskComposerInstanceKey('global', null)).not.toContain('project');
   });
 });

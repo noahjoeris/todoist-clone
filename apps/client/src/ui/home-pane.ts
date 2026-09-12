@@ -26,3 +26,13 @@ export function taskDestinationOf(pane: HomePane): TaskDestination | null {
 export function isTaskListPane(pane: HomePane): boolean {
   return pane.type !== 'labels' && pane.type !== 'projects';
 }
+
+/** Catalog drop of the open project. Wait for ready so a loading catalog does not bounce. */
+export function viewedProjectIsMissing(
+  pane: HomePane,
+  projectsReady: boolean,
+  projectIds: readonly string[],
+): boolean {
+  if (pane.type !== 'project' || !projectsReady) return false;
+  return !projectIds.includes(pane.projectId);
+}

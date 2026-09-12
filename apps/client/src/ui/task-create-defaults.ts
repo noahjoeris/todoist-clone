@@ -19,3 +19,11 @@ export function defaultComposerLabelIds(
   if (composerKind === 'view' && pane.type === 'label') return [pane.labelId];
   return undefined;
 }
+
+/**
+ * Composer identity for remounts. Must not include the current project: a
+ * catalog drop of the open project would remount and wipe an in-flight draft.
+ */
+export function taskComposerInstanceKey(kind: ComposerKind, date: string | null): string {
+  return `${kind}:${date ?? 'none'}`;
+}

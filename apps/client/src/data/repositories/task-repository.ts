@@ -33,6 +33,11 @@ export interface TaskRepository {
   /** Inserts the snapshot with its original id. Refuses if that id already exists locally. */
   restore(task: Task): Promise<void>;
   subscribe(onTasks: (tasks: Task[]) => void, onError: (error: Error) => void): () => void;
+  subscribeById(
+    id: string,
+    onTask: (task: Task | null) => void,
+    onError: (error: Error) => void,
+  ): () => void;
   subscribeView(
     query: TaskViewQuery,
     onTasks: (tasks: Task[]) => void,
@@ -357,6 +362,33 @@ function createTableTaskRepository(
         [target.userId],
         (rows) => {
           onTasks(collectAccountTasks(rows));
+        },
+        onError,
+        ACCOUNT_WATCH_TABLES,
+      );
+    },
+
+    subscribeById(id, onTask, onError) {
+      if (target.table === 'local_tasks') {
+        return watchQuery<TaskRow>(
+          database,
+          `SELECT ${TASK_COLUMNS} FROM local_tasks WHERE id = ?`,
+          [id],
+          (rows) => {
+            onTask(rows[0] ? mapGuestTaskRow(rows[0]) : null);
+          },
+          onError,
+        );
+      }
+      return watchQuery<TaskRow>(
+        database,
+        `SELECT ${TASK_TABLE_COLUMNS}
+         ${TASK_ACCOUNT_JOINS}
+         WHERE t.id = ? AND t.user_id = ?
+         ORDER BY lower(l.name) ASC, l.id ASC`,
+        [id, target.userId],
+        (rows) => {
+          onTask(collectAccountTasks(rows)[0] ?? null);
         },
         onError,
         ACCOUNT_WATCH_TABLES,

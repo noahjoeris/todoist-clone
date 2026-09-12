@@ -15,21 +15,22 @@ import { ActionButton } from '../components/ActionButton';
 import { LabelColorPicker } from '../components/LabelColorPicker';
 import { TextField } from '../components/TextField';
 import { confirmProjectDelete } from '../confirm-project-delete';
+import { type ProjectsTab, projectsTabForCreate } from '../project-create-form';
 import { colors, hexForLabelColor, nameForLabelColor } from '../theme';
 
 interface ProjectsScreenProps {
   repository: ProjectRepository;
   onOpenProject: (projectId: string) => void;
-  startAdding?: boolean;
+  adding?: boolean;
+  onAddingChange?: (adding: boolean) => void;
   leading?: ReactNode;
 }
-
-type Tab = 'active' | 'archived';
 
 export function ProjectsScreen({
   repository,
   onOpenProject,
-  startAdding = false,
+  adding = false,
+  onAddingChange,
   leading,
 }: ProjectsScreenProps) {
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
@@ -38,14 +39,23 @@ export function ProjectsScreen({
   const [retry, setRetry] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [adding, setAdding] = useState(startAdding);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('active');
+  const [tab, setTab] = useState<ProjectsTab>('active');
+  const visibleTab = projectsTabForCreate(adding, tab);
 
   const visible = useMemo(
-    () => (tab === 'active' ? activeProjects(projects) : archivedProjects(projects)),
-    [projects, tab],
+    () => (visibleTab === 'active' ? activeProjects(projects) : archivedProjects(projects)),
+    [projects, visibleTab],
   );
+
+  useEffect(() => {
+    if (!adding) return;
+    setEditingId(null);
+  }, [adding]);
+
+  function setAdding(next: boolean) {
+    onAddingChange?.(next);
+  }
 
   useEffect(() => {
     void retry;
@@ -123,29 +133,31 @@ export function ProjectsScreen({
       <Text style={styles.subtitle}>
         {loading
           ? ''
-          : `${visible.length} ${visible.length === 1 ? 'project' : 'projects'}${tab === 'archived' ? ' archived' : ''}`}
+          : `${visible.length} ${visible.length === 1 ? 'project' : 'projects'}${visibleTab === 'archived' ? ' archived' : ''}`}
       </Text>
       <View style={styles.tabs} accessibilityRole="tablist">
         <Pressable
           accessibilityRole="tab"
-          accessibilityState={{ selected: tab === 'active' }}
+          accessibilityState={{ selected: visibleTab === 'active' }}
           onPress={() => setTab('active')}
-          style={[styles.tab, tab === 'active' && styles.tabSelected]}
+          style={[styles.tab, visibleTab === 'active' && styles.tabSelected]}
         >
-          <Text style={[styles.tabLabel, tab === 'active' && styles.tabLabelSelected]}>Active</Text>
+          <Text style={[styles.tabLabel, visibleTab === 'active' && styles.tabLabelSelected]}>
+            Active
+          </Text>
         </Pressable>
         <Pressable
           accessibilityRole="tab"
-          accessibilityState={{ selected: tab === 'archived' }}
+          accessibilityState={{ selected: visibleTab === 'archived' }}
           onPress={() => setTab('archived')}
-          style={[styles.tab, tab === 'archived' && styles.tabSelected]}
+          style={[styles.tab, visibleTab === 'archived' && styles.tabSelected]}
         >
-          <Text style={[styles.tabLabel, tab === 'archived' && styles.tabLabelSelected]}>
+          <Text style={[styles.tabLabel, visibleTab === 'archived' && styles.tabLabelSelected]}>
             Archived
           </Text>
         </Pressable>
       </View>
-      {adding && tab === 'active' ? (
+      {adding && visibleTab === 'active' ? (
         <ProjectEditor
           submitLabel="Add"
           pending={pendingId === 'new'}
@@ -162,7 +174,7 @@ export function ProjectsScreen({
           onCancel={() => setAdding(false)}
         />
       ) : (
-        tab === 'active' && (
+        visibleTab === 'active' && (
           <View style={styles.add}>
             <ActionButton
               label="+ Add project"
@@ -193,10 +205,10 @@ export function ProjectsScreen({
       {!loading && !error && visible.length === 0 && !adding && (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>
-            {tab === 'active' ? 'No projects yet.' : 'No archived projects.'}
+            {visibleTab === 'active' ? 'No projects yet.' : 'No archived projects.'}
           </Text>
           <Text style={styles.emptyText}>
-            {tab === 'active'
+            {visibleTab === 'active'
               ? 'Create a project to organize tasks beyond Inbox.'
               : 'Archived projects stay here with their tasks until you unarchive or delete them.'}
           </Text>
@@ -244,7 +256,7 @@ export function ProjectsScreen({
                   </View>
                 </Pressable>
                 <View style={styles.actions}>
-                  {tab === 'active' && (
+                  {visibleTab === 'active' && (
                     <>
                       <ActionButton
                         label={project.isFavorite ? '★' : '☆'}
@@ -287,7 +299,7 @@ export function ProjectsScreen({
                       />
                     </>
                   )}
-                  {tab === 'archived' && (
+                  {visibleTab === 'archived' && (
                     <ActionButton
                       label="Unarchive"
                       disabled={pendingId != null}
