@@ -346,5 +346,4 @@ guest `local_tasks` and account-owned `tasks`.
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,
-different command), attachments/Storage, native confirmation/recovery deep-link exchange,
-and social login.
+different command), attachments/Storage, and social login.

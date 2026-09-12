@@ -11,7 +11,7 @@ import {
   passwordSchema,
   toAuthFailure,
 } from './auth';
-import type { AuthUrlError } from './auth-url';
+import { type AuthUrlError, parseAuthUrlType } from './auth-url';
 
 export type SignUpOutcome = 'confirmation-required' | 'signed-in';
 
@@ -107,6 +107,7 @@ export function createAuthRepository(
       guestOverride = false;
       const passwordRecovery =
         extras?.passwordRecovery === true ||
+        pendingPasswordRecovery ||
         (state.status === 'signed-in' && state.passwordRecovery === true);
       setState(
         passwordRecovery
@@ -210,6 +211,9 @@ export function createAuthRepository(
     // getSession(null) cannot apply signed-out while we exchange.
     restorationGeneration += 1;
     authCallbackInFlight = true;
+    if (parseAuthUrlType(url) === 'recovery') {
+      pendingPasswordRecovery = true;
+    }
     if (state.status === 'restore-failed') {
       setState({ status: 'restoring' });
     }
@@ -218,7 +222,7 @@ export function createAuthRepository(
       const session = await createSessionFromAuthUrl(auth, url);
       if (session) {
         restorationGeneration += 1;
-        applySession(session);
+        applySession(session, pendingPasswordRecovery ? { passwordRecovery: true } : undefined);
         return true;
       }
       authCallbackInFlight = false;

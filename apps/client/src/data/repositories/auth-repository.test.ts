@@ -845,4 +845,70 @@ describe('auth repository', () => {
       expect(auth.signUp).toHaveBeenCalledWith(credentials);
     });
   });
+
+  describe('recovery deep link', () => {
+    it('keeps passwordRecovery after a cold-start PKCE exchange that emits PASSWORD_RECOVERY', async () => {
+      const pendingRestore = deferred<{ data: { session: Session | null }; error: null }>();
+      const pendingExchange = deferred<{ data: { session: Session | null }; error: null }>();
+      auth.getSession.mockReturnValue(pendingRestore.promise);
+      auth.exchangeCodeForSession.mockImplementation(() => {
+        emitAuthEvent('PASSWORD_RECOVERY', session());
+        return pendingExchange.promise;
+      });
+      const repository = createRepository();
+      const restoration = repository.restoreSession();
+
+      const apply = handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=pkce-recovery`);
+      expect(repository.getState().status).toBe('restoring');
+
+      pendingRestore.resolve({ data: { session: null }, error: null });
+      await restoration;
+      expect(repository.getState().status).toBe('restoring');
+
+      pendingExchange.resolve({ data: { session: session() }, error: null });
+      await apply;
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+        passwordRecovery: true,
+      });
+    });
+
+    it('marks passwordRecovery from an implicit recovery callback URL type', async () => {
+      auth.setSession.mockResolvedValue({ data: { session: session() }, error: null });
+      const repository = createRepository();
+
+      await handleDeepLink(
+        `${EMAIL_CONFIRMATION_REDIRECT_TO}#access_token=at&refresh_token=rt&type=recovery`,
+      );
+
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+        passwordRecovery: true,
+      });
+    });
+
+    it('applies passwordRecovery from a recovery deep link after continue-as-guest', async () => {
+      auth.getSession.mockResolvedValue({
+        data: { session: null },
+        error: new AuthRetryableFetchError('fetch failed', 0),
+      });
+      auth.exchangeCodeForSession.mockImplementation(async () => {
+        emitAuthEvent('PASSWORD_RECOVERY', session());
+        return { data: { session: session() }, error: null };
+      });
+      const repository = createRepository();
+      await repository.restoreSession();
+      repository.continueAsGuest();
+
+      await handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=pkce-recovery`);
+
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+        passwordRecovery: true,
+      });
+    });
+  });
 });
