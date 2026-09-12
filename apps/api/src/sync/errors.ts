@@ -19,6 +19,7 @@ export class InvalidRequestError extends Error {
 }
 
 export const LABELS_NAME_UNIQUE = 'labels_user_id_lower_name_idx';
+export const PROJECTS_NAME_UNIQUE = 'projects_user_id_lower_name_idx';
 export const TASK_LABELS_PAIR_UNIQUE = 'task_labels_task_id_label_id_uidx';
 
 export function isUniqueViolation(error: unknown, constraintName: string): boolean {
@@ -48,5 +49,11 @@ export function isUniqueViolation(error: unknown, constraintName: string): boole
 export function duplicateLabelNameError(): InvalidRequestError {
   return new InvalidRequestError([
     { path: 'name', message: 'A label with this name already exists' },
+  ]);
+}
+
+export function duplicateProjectNameError(): InvalidRequestError {
+  return new InvalidRequestError([
+    { path: 'name', message: 'A project with this name already exists' },
   ]);
 }

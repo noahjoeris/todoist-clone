@@ -3,7 +3,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { applyUpload, ForbiddenError, InvalidRequestError } from '../sync/apply-upload.js';
 
 /**
- * PowerSync backend connector contract (ADR-014 / ADR-015 / ADR-019):
+ * PowerSync backend connector contract (ADR-014 / ADR-015 / ADR-019 / ADR-021):
  * - 2xx → connector `complete()`s the transaction.
  * - 400/403 → connector logs and `complete()`s (client bug; the batch is discarded).
  * - 401 → connector throws (retry after token refresh).

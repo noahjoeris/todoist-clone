@@ -7,7 +7,7 @@ import { and, eq, schema, sql } from '@todoist-clone/database';
 import { ForbiddenError, InvalidRequestError } from './errors.js';
 import type { UploadExecutor } from './types.js';
 
-const { tasks } = schema;
+const { projects, tasks } = schema;
 
 type TaskEntry = Extract<CrudEntry, { table: 'tasks' }>;
 
@@ -35,11 +35,17 @@ async function applyPut(
   operation: Extract<TaskEntry, { op: 'PUT' }>,
 ): Promise<void> {
   const { opData } = operation;
+  const projectId = opData.project_id ?? null;
+  if (projectId != null) {
+    await assertOwnedProjectLocked(tx, projectId, userId);
+  }
+
   const written = await tx
     .insert(tasks)
     .values({
       id: operation.id,
       userId,
+      projectId,
       title: opData.title,
       description: opData.description,
       priority: opData.priority,
@@ -52,6 +58,7 @@ async function applyPut(
     .onConflictDoUpdate({
       target: tasks.id,
       set: {
+        projectId,
         title: opData.title,
         description: opData.description,
         priority: opData.priority,
@@ -75,7 +82,7 @@ async function applyPatch(
   userId: string,
   operation: Extract<TaskEntry, { op: 'PATCH' }>,
 ): Promise<void> {
-  const opData = await mergeSchedulePatch(tx, userId, operation);
+  const opData = await preparePatch(tx, userId, operation);
   if (opData === null) {
     return;
   }
@@ -96,18 +103,36 @@ async function applyPatch(
   }
 }
 
-/** Date/time are coupled; validate the merged stored row, not the partial patch. */
-async function mergeSchedulePatch(
+/**
+ * Lock a referenced project before the task row. A missing task PATCH is a
+ * no-op even with a stale project_id; a live task with a missing/foreign
+ * destination is 403. Omitted project_id does not revalidate membership.
+ */
+async function preparePatch(
   tx: UploadExecutor,
   userId: string,
   operation: Extract<TaskEntry, { op: 'PATCH' }>,
 ): Promise<TaskPatchColumns | null> {
   const { opData } = operation;
-  if (opData.scheduled_date === undefined && opData.scheduled_time === undefined) {
+  const projectIdSupplied = opData.project_id !== undefined;
+  const needsScheduleMerge =
+    opData.scheduled_date !== undefined || opData.scheduled_time !== undefined;
+
+  if (!projectIdSupplied && !needsScheduleMerge) {
     return opData;
   }
 
-  // Lock until this transaction's UPDATE so a concurrent PATCH cannot stale the merge.
+  let projectOwner: string | undefined;
+  if (opData.project_id != null) {
+    const [project] = await tx
+      .select({ userId: projects.userId })
+      .from(projects)
+      .where(eq(projects.id, opData.project_id))
+      .limit(1)
+      .for('update');
+    projectOwner = project?.userId;
+  }
+
   const [existing] = await tx
     .select({
       userId: tasks.userId,
@@ -124,6 +149,13 @@ async function mergeSchedulePatch(
   }
   if (existing.userId !== userId) {
     throw new ForbiddenError();
+  }
+  if (opData.project_id != null && projectOwner !== userId) {
+    throw new ForbiddenError();
+  }
+
+  if (!needsScheduleMerge) {
+    return opData;
   }
 
   const merged = mergeScheduledColumns(
@@ -161,6 +193,23 @@ async function applyDelete(
   }
 }
 
+async function assertOwnedProjectLocked(
+  tx: UploadExecutor,
+  projectId: string,
+  userId: string,
+): Promise<void> {
+  const [project] = await tx
+    .select({ userId: projects.userId })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1)
+    .for('update');
+
+  if (!project || project.userId !== userId) {
+    throw new ForbiddenError();
+  }
+}
+
 async function assertMissingOrOwned(tx: UploadExecutor, id: string, userId: string): Promise<void> {
   const [existing] = await tx
     .select({ userId: tasks.userId })
@@ -182,6 +231,7 @@ function patchSet(opData: TaskPatchColumns) {
     scheduledTime?: string | null;
     completedAt?: string | null;
     createdAt?: string;
+    projectId?: string | null;
     updatedAt: ReturnType<typeof sql>;
   } = { updatedAt: sql`now()` };
 
@@ -212,6 +262,10 @@ function patchSet(opData: TaskPatchColumns) {
   }
   if (opData.created_at !== undefined) {
     set.createdAt = opData.created_at;
+    hasColumn = true;
+  }
+  if (opData.project_id !== undefined) {
+    set.projectId = opData.project_id;
     hasColumn = true;
   }
 
