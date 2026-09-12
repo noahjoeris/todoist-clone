@@ -569,3 +569,311 @@ describe('account-owned task repository', () => {
     });
   });
 });
+
+function bindWatch(sqlite: DatabaseSync, watch: ReturnType<typeof vi.fn>) {
+  watch.mockImplementation((sql, parameters, callback) => {
+    const array = sqlite.prepare(sql).all(...(parameters ?? []));
+    callback?.onResult({
+      array,
+      *[Symbol.iterator]() {
+        yield* array;
+        return undefined;
+      },
+    });
+  });
+}
+
+function insertLocal(
+  sqlite: DatabaseSync,
+  row: {
+    id: string;
+    title: string;
+    priority?: number;
+    scheduledDate?: string | null;
+    scheduledTime?: string | null;
+    completedAt?: string | null;
+    createdAt?: string;
+  },
+) {
+  sqlite
+    .prepare(
+      `INSERT INTO local_tasks
+        (id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at)
+       VALUES (?, ?, '', ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      row.id,
+      row.title,
+      row.priority ?? 4,
+      row.scheduledDate ?? null,
+      row.scheduledTime ?? null,
+      row.completedAt ?? null,
+      row.createdAt ?? '2026-09-10T08:00:00.000Z',
+    );
+}
+
+describe('task view queries', () => {
+  let sqlite: DatabaseSync;
+  let directory: string;
+  const execute =
+    vi.fn<(sql: string, parameters?: SQLInputValue[]) => Promise<QueryResult<never>>>();
+  const watch = vi.fn<CommonPowerSyncDatabase['watchWithCallback']>();
+  const writeTransaction = vi.fn();
+  const repository = createTaskRepository(
+    { execute, watchWithCallback: watch, writeTransaction },
+    randomUUID,
+  );
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    directory = mkdtempSync(join(tmpdir(), 'todoist-task-views-'));
+    sqlite = new DatabaseSync(join(directory, 'tasks.sqlite'));
+    sqlite.exec(`CREATE TABLE local_tasks (
+      id TEXT PRIMARY KEY, title TEXT, description TEXT, priority INTEGER,
+      scheduled_date TEXT, scheduled_time TEXT, completed_at TEXT, created_at TEXT
+    )`);
+    bindSqlite(sqlite, execute, writeTransaction);
+    bindWatch(sqlite, watch);
+  });
+
+  afterEach(() => {
+    sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  function titles(query: Parameters<typeof repository.subscribeView>[0]) {
+    const onTasks = vi.fn();
+    repository.subscribeView(query, onTasks, vi.fn());
+    const tasks = onTasks.mock.calls[0]?.[0] as { title: string }[] | undefined;
+    if (tasks == null) throw new Error('expected view results');
+    return tasks.map((task) => task.title);
+  }
+
+  function counts(today: string) {
+    const onCounts = vi.fn();
+    repository.subscribeActiveCounts(today, onCounts, vi.fn());
+    return onCounts.mock.calls[0]?.[0];
+  }
+
+  it('keeps scheduled tasks in Inbox and omits unscheduled from Today and Upcoming', () => {
+    insertLocal(sqlite, { id: 'u', title: 'Unscheduled' });
+    insertLocal(sqlite, { id: 's', title: 'Scheduled', scheduledDate: '2026-09-20' });
+    insertLocal(sqlite, { id: 'p', title: 'Past', scheduledDate: '2026-09-10' });
+    insertLocal(sqlite, { id: 'n', title: 'Now', scheduledDate: '2026-09-12' });
+
+    expect(titles({ destination: 'inbox', completion: 'active' })).toEqual(
+      expect.arrayContaining(['Unscheduled', 'Scheduled', 'Past', 'Now']),
+    );
+    expect(titles({ destination: 'today', today: '2026-09-12', completion: 'active' })).toEqual([
+      'Past',
+      'Now',
+    ]);
+    expect(
+      titles({
+        destination: 'upcoming',
+        startInclusive: '2026-09-13',
+        endExclusive: '2026-10-13',
+        completion: 'active',
+      }),
+    ).toEqual(['Scheduled']);
+  });
+
+  it('orders Inbox by priority then createdAt, and dated views timed-before-date-only', () => {
+    insertLocal(sqlite, {
+      id: 'p4-new',
+      title: 'P4 new',
+      priority: 4,
+      createdAt: '2026-09-11T12:00:00.000Z',
+    });
+    insertLocal(sqlite, {
+      id: 'p4-old',
+      title: 'P4 old',
+      priority: 4,
+      createdAt: '2026-09-10T12:00:00.000Z',
+    });
+    insertLocal(sqlite, {
+      id: 'p1',
+      title: 'P1',
+      priority: 1,
+      createdAt: '2026-09-09T12:00:00.000Z',
+    });
+    expect(titles({ destination: 'inbox', completion: 'active' })).toEqual([
+      'P1',
+      'P4 new',
+      'P4 old',
+    ]);
+
+    insertLocal(sqlite, {
+      id: 'date-only',
+      title: 'Date only',
+      scheduledDate: '2026-09-12',
+      priority: 1,
+    });
+    insertLocal(sqlite, {
+      id: 'late',
+      title: 'Late',
+      scheduledDate: '2026-09-12',
+      scheduledTime: '18:00',
+      priority: 1,
+    });
+    insertLocal(sqlite, {
+      id: 'early',
+      title: 'Early',
+      scheduledDate: '2026-09-12',
+      scheduledTime: '09:00',
+      priority: 4,
+    });
+    insertLocal(sqlite, {
+      id: 'overdue',
+      title: 'Overdue',
+      scheduledDate: '2026-09-11',
+      scheduledTime: '23:00',
+    });
+    expect(titles({ destination: 'today', today: '2026-09-12', completion: 'active' })).toEqual([
+      'Overdue',
+      'Early',
+      'Late',
+      'Date only',
+    ]);
+  });
+
+  it('orders completed by completedAt descending then id, using scheduled date for membership', () => {
+    insertLocal(sqlite, {
+      id: 'c-future',
+      title: 'Future done',
+      scheduledDate: '2026-09-20',
+      completedAt: '2026-09-12T18:00:00.000Z',
+    });
+    insertLocal(sqlite, {
+      id: 'c-today-b',
+      title: 'Today B',
+      scheduledDate: '2026-09-12',
+      completedAt: '2026-09-12T12:00:00.000Z',
+    });
+    insertLocal(sqlite, {
+      id: 'c-today-a',
+      title: 'Today A',
+      scheduledDate: '2026-09-12',
+      completedAt: '2026-09-12T12:00:00.000Z',
+    });
+    insertLocal(sqlite, {
+      id: 'c-none',
+      title: 'Unscheduled done',
+      completedAt: '2026-09-12T19:00:00.000Z',
+    });
+
+    expect(titles({ destination: 'inbox', completion: 'completed' })).toEqual([
+      'Unscheduled done',
+      'Future done',
+      'Today B',
+      'Today A',
+    ]);
+    expect(titles({ destination: 'today', today: '2026-09-12', completion: 'completed' })).toEqual([
+      'Today B',
+      'Today A',
+    ]);
+    expect(
+      titles({
+        destination: 'upcoming',
+        startInclusive: '2026-09-13',
+        endExclusive: '2026-10-13',
+        completion: 'completed',
+      }),
+    ).toEqual(['Future done']);
+  });
+
+  it('matches live counts to active list predicates and expands upcoming without duplicating', () => {
+    insertLocal(sqlite, { id: 'u', title: 'Unscheduled' });
+    insertLocal(sqlite, { id: 'over', title: 'Overdue', scheduledDate: '2026-09-10' });
+    insertLocal(sqlite, { id: 'now', title: 'Today', scheduledDate: '2026-09-12' });
+    insertLocal(sqlite, { id: 'soon', title: 'Soon', scheduledDate: '2026-09-13' });
+    insertLocal(sqlite, { id: 'later', title: 'Later', scheduledDate: '2026-10-20' });
+    insertLocal(sqlite, {
+      id: 'done',
+      title: 'Done today',
+      scheduledDate: '2026-09-12',
+      completedAt: '2026-09-12T10:00:00.000Z',
+    });
+
+    expect(counts('2026-09-12')).toEqual({ inbox: 5, today: 2 });
+
+    const firstPage = titles({
+      destination: 'upcoming',
+      startInclusive: '2026-09-13',
+      endExclusive: '2026-10-13',
+      completion: 'active',
+    });
+    const expanded = titles({
+      destination: 'upcoming',
+      startInclusive: '2026-09-13',
+      endExclusive: '2026-11-12',
+      completion: 'active',
+    });
+    expect(firstPage).toEqual(['Soon']);
+    expect(expanded).toEqual(['Soon', 'Later']);
+    expect(new Set(expanded).size).toBe(expanded.length);
+  });
+});
+
+describe('account-owned task view isolation', () => {
+  const USER_A = '11111111-1111-4111-8111-111111111111';
+  const USER_B = '22222222-2222-4222-8222-222222222222';
+  let sqlite: DatabaseSync;
+  let directory: string;
+  const execute =
+    vi.fn<(sql: string, parameters?: SQLInputValue[]) => Promise<QueryResult<never>>>();
+  const watch = vi.fn<CommonPowerSyncDatabase['watchWithCallback']>();
+  const writeTransaction = vi.fn();
+  const repositories = createTaskRepositories(
+    { execute, watchWithCallback: watch, writeTransaction },
+    randomUUID,
+  );
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    directory = mkdtempSync(join(tmpdir(), 'todoist-user-views-'));
+    sqlite = new DatabaseSync(join(directory, 'tasks.sqlite'));
+    sqlite.exec(`CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, description TEXT, priority INTEGER,
+      scheduled_date TEXT, scheduled_time TEXT, completed_at TEXT, created_at TEXT, updated_at TEXT
+    )`);
+    bindSqlite(sqlite, execute, writeTransaction);
+    bindWatch(sqlite, watch);
+  });
+
+  afterEach(() => {
+    sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('scopes view lists and counts to the owner', async () => {
+    await repositories.forUser(USER_A).create({ title: 'A inbox' });
+    await repositories.forUser(USER_A).create({
+      title: 'A today',
+      scheduledDate: '2026-09-12',
+    });
+    await repositories.forUser(USER_B).create({
+      title: 'B today',
+      scheduledDate: '2026-09-12',
+    });
+
+    const onTasks = vi.fn();
+    repositories
+      .forUser(USER_A)
+      .subscribeView(
+        { destination: 'today', today: '2026-09-12', completion: 'active' },
+        onTasks,
+        vi.fn(),
+      );
+    const todayTasks = onTasks.mock.calls[0]?.[0] as { title: string }[] | undefined;
+    expect(todayTasks?.map((task) => task.title)).toEqual(['A today']);
+
+    const onCounts = vi.fn();
+    repositories.forUser(USER_A).subscribeActiveCounts('2026-09-12', onCounts, vi.fn());
+    expect(onCounts.mock.calls[0]?.[0]).toEqual({ inbox: 2, today: 1 });
+
+    const onB = vi.fn();
+    repositories.forUser(USER_B).subscribeActiveCounts('2026-09-12', onB, vi.fn());
+    expect(onB.mock.calls[0]?.[0]).toEqual({ inbox: 1, today: 1 });
+  });
+});

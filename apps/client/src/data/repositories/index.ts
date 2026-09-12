@@ -44,3 +44,10 @@ export {
   type TaskRepositories,
   type TaskRepository,
 } from './task-repository';
+export {
+  type TaskActiveCounts,
+  type TaskCompletionSelection,
+  type TaskDestination,
+  type TaskViewQuery,
+  UPCOMING_PAGE_DAYS,
+} from './task-view';
