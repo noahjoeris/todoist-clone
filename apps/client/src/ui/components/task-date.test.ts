@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { calendarDays, dateLabel, toCalendarDate } from './task-date';
+import {
+  addCalendarDays,
+  calendarDays,
+  dateLabel,
+  millisecondsUntilLocalMidnight,
+  toCalendarDate,
+  upcomingBounds,
+} from './task-date';
 
 describe('calendar dates', () => {
   it('uses local calendar components, including near midnight', () => {
@@ -30,5 +37,33 @@ describe('calendar dates', () => {
 
   it('supports a month spanning six calendar rows', () => {
     expect(calendarDays(new Date(2026, 2, 1))).toHaveLength(42);
+  });
+
+  it('adds calendar days across month, year, and leap-day boundaries', () => {
+    expect(addCalendarDays('2026-01-31', 1)).toBe('2026-02-01');
+    expect(addCalendarDays('2026-12-31', 1)).toBe('2027-01-01');
+    expect(addCalendarDays('2028-02-28', 1)).toBe('2028-02-29');
+    expect(addCalendarDays('2028-02-29', 1)).toBe('2028-03-01');
+    expect(addCalendarDays('2026-09-13', 30)).toBe('2026-10-13');
+  });
+
+  it('does not skip a local calendar day when a 24-hour duration would', () => {
+    const start = new Date(2026, 2, 8, 0, 0, 0);
+    expect(addCalendarDays(toCalendarDate(start), 1)).toBe('2026-03-09');
+    expect(addCalendarDays('2026-03-08', 1)).toBe(toCalendarDate(new Date(2026, 2, 9)));
+  });
+
+  it('builds an exclusive upcoming window starting tomorrow', () => {
+    expect(upcomingBounds('2026-09-12', 30)).toEqual({
+      startInclusive: '2026-09-13',
+      endExclusive: '2026-10-13',
+    });
+  });
+
+  it('measures time until local midnight without a fixed 24-hour duration', () => {
+    const evening = new Date(2026, 8, 12, 23, 0, 0);
+    expect(millisecondsUntilLocalMidnight(evening)).toBe(60 * 60 * 1000);
+    const almost = new Date(2026, 8, 12, 23, 59, 59, 500);
+    expect(millisecondsUntilLocalMidnight(almost)).toBe(500);
   });
 });

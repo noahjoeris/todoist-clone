@@ -6,6 +6,12 @@ import {
   TaskRestoreConflictError,
   taskInputSchema,
 } from './task';
+import {
+  type TaskActiveCounts,
+  type TaskViewQuery,
+  viewOrderSql,
+  viewPredicate,
+} from './task-view';
 
 export interface TaskRepository {
   create(input: TaskInput): Promise<void>;
@@ -17,6 +23,16 @@ export interface TaskRepository {
   /** Inserts the snapshot with its original id. Refuses if that id already exists locally. */
   restore(task: Task): Promise<void>;
   subscribe(onTasks: (tasks: Task[]) => void, onError: (error: Error) => void): () => void;
+  subscribeView(
+    query: TaskViewQuery,
+    onTasks: (tasks: Task[]) => void,
+    onError: (error: Error) => void,
+  ): () => void;
+  subscribeActiveCounts(
+    today: string,
+    onCounts: (counts: TaskActiveCounts) => void,
+    onError: (error: Error) => void,
+  ): () => void;
 }
 
 export interface TaskRepositories {
@@ -241,7 +257,6 @@ function createTableTaskRepository(
     },
 
     subscribe(onTasks, onError) {
-      const controller = new AbortController();
       const query =
         target.table === 'local_tasks'
           ? {
@@ -254,22 +269,110 @@ function createTableTaskRepository(
          FROM tasks WHERE user_id = ? ORDER BY created_at DESC, id DESC`,
               parameters: [target.userId],
             };
-      database.watchWithCallback(
+      return watchQuery<TaskRow>(
+        database,
         query.sql,
         query.parameters,
-        {
-          onResult: (result) => {
-            if (!controller.signal.aborted) onTasks((result.array as TaskRow[]).map(mapTaskRow));
-          },
-          onError: (error) => {
-            if (!controller.signal.aborted) onError(error);
-          },
+        (rows) => {
+          onTasks(rows.map(mapTaskRow));
         },
-        { signal: controller.signal },
+        onError,
       );
-      return () => controller.abort();
+    },
+
+    subscribeView(query, onTasks, onError) {
+      const compiled = compileViewQuery(target, query);
+      return watchQuery<TaskRow>(
+        database,
+        compiled.sql,
+        compiled.parameters,
+        (rows) => {
+          onTasks(rows.map(mapTaskRow));
+        },
+        onError,
+      );
+    },
+
+    subscribeActiveCounts(today, onCounts, onError) {
+      const compiled = compileActiveCountQuery(target, today);
+      return watchQuery<{ inbox?: unknown; today?: unknown }>(
+        database,
+        compiled.sql,
+        compiled.parameters,
+        (rows) => {
+          const row = rows[0];
+          onCounts({
+            inbox: Number(row?.inbox ?? 0),
+            today: Number(row?.today ?? 0),
+          });
+        },
+        onError,
+      );
     },
   };
+}
+
+type OwnerScope = { from: string; sql: string; params: string[] };
+
+function ownerScope(target: TaskTarget): OwnerScope {
+  if (target.table === 'local_tasks') {
+    return { from: 'local_tasks', sql: '1 = 1', params: [] };
+  }
+  return { from: 'tasks', sql: 'user_id = ?', params: [target.userId] };
+}
+
+function compileViewQuery(
+  target: TaskTarget,
+  query: TaskViewQuery,
+): { sql: string; parameters: string[] } {
+  const owner = ownerScope(target);
+  const view = viewPredicate(query);
+  return {
+    sql: `SELECT ${TASK_COLUMNS}
+         FROM ${owner.from}
+         WHERE ${owner.sql} AND ${view.sql}
+         ${viewOrderSql(query)}`,
+    parameters: [...owner.params, ...view.params],
+  };
+}
+
+function compileActiveCountQuery(
+  target: TaskTarget,
+  today: string,
+): { sql: string; parameters: string[] } {
+  const owner = ownerScope(target);
+  return {
+    sql: `SELECT
+            COALESCE(SUM(CASE WHEN completed_at IS NULL THEN 1 ELSE 0 END), 0) AS inbox,
+            COALESCE(SUM(CASE WHEN completed_at IS NULL AND scheduled_date IS NOT NULL AND scheduled_date <= ? THEN 1 ELSE 0 END), 0) AS today
+         FROM ${owner.from}
+         WHERE ${owner.sql}`,
+    parameters: [today, ...owner.params],
+  };
+}
+
+function watchQuery<T>(
+  database: TaskDatabase,
+  sql: string,
+  parameters: string[],
+  onRows: (rows: T[]) => void,
+  onError: (error: Error) => void,
+): () => void {
+  const controller = new AbortController();
+  database.watchWithCallback(
+    sql,
+    parameters,
+    {
+      onResult: (result) => {
+        if (!controller.signal.aborted) onRows(result.array as T[]);
+      },
+      onError: (error) => {
+        if (!controller.signal.aborted) onError(error);
+      },
+    },
+    { signal: controller.signal },
+  );
+  return () => controller.abort();
 }
 
 async function readOwnedTask(

@@ -7,9 +7,19 @@ interface TaskEditorProps {
   onSave: (input: TaskInput) => Promise<void>;
   onDelete: () => Promise<void>;
   onClose: () => void;
+  today?: string;
+  registerDirtyCheck?: (isDirty: () => boolean) => () => void;
 }
 
-export function TaskEditor({ task, missing, onSave, onDelete, onClose }: TaskEditorProps) {
+export function TaskEditor({
+  task,
+  missing,
+  onSave,
+  onDelete,
+  onClose,
+  today,
+  registerDirtyCheck,
+}: TaskEditorProps) {
   return (
     <TaskForm
       initial={task ? draftFromTask(task) : emptyTaskDraft}
@@ -21,6 +31,8 @@ export function TaskEditor({ task, missing, onSave, onDelete, onClose }: TaskEdi
       submitAccessibilityLabel="Save task"
       cancelAccessibilityLabel="Cancel editing"
       autoFocus={!missing}
+      {...(today !== undefined ? { today } : {})}
+      {...(registerDirtyCheck ? { registerDirtyCheck } : {})}
     />
   );
 }

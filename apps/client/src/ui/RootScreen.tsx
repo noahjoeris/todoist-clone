@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { StyleSheet, View } from 'react-native';
-import type {
-  AuthFailure,
-  AuthRepository,
-  GuestTaskAdoptionRepository,
-  SyncStatusSource,
-  TaskRepositories,
+import {
+  type AuthFailure,
+  type AuthRepository,
+  type GuestTaskAdoptionRepository,
+  type SyncStatusSource,
+  type TaskDestination,
+  type TaskRepositories,
+  type TaskRepository,
+  UPCOMING_PAGE_DAYS,
 } from '../data/repositories';
 import type { DataSystem } from '../data/system';
+import type { AccountEntry } from './account-entry';
 import { canWriteAccountTasks } from './account-write-ready';
 import { GuestTaskAdoptionBanner } from './components/GuestTaskAdoptionBanner';
 import { useAuthState } from './hooks/useAuthState';
@@ -32,10 +35,10 @@ import { UpdatePasswordScreen } from './screens/UpdatePasswordScreen';
 export function RootScreen({ system }: { system: DataSystem }) {
   switch (system.auth.status) {
     case 'unconfigured':
-      return <HomeScreen repository={system.tasks.guest} account={{ kind: 'hidden' }} />;
+      return <GuestHome repository={system.tasks.guest} account={{ kind: 'hidden' }} />;
     case 'misconfigured':
       return (
-        <HomeScreen
+        <GuestHome
           repository={system.tasks.guest}
           account={{ kind: 'unavailable', message: system.auth.error.message }}
         />
@@ -79,12 +82,21 @@ function AccountAwareScreen({
 }) {
   const authState = useAuthState(auth);
   const [screen, setScreen] = useState<AuthScreen | null>(null);
+  const [destination, setDestination] = useState<TaskDestination>('inbox');
+  const [upcomingDays, setUpcomingDays] = useState(UPCOMING_PAGE_DAYS);
   const signedInUserId = authState.status === 'signed-in' ? authState.user.id : null;
+  const identityKey = signedInUserId ?? 'guest';
   const localDataReady = useAccountLocalDataReady(sync, signedInUserId);
   const userTasks = useMemo(
     () => (signedInUserId == null ? null : tasks.forUser(signedInUserId)),
     [tasks, signedInUserId],
   );
+
+  useEffect(() => {
+    void identityKey;
+    setDestination('inbox');
+    setUpcomingDays(UPCOMING_PAGE_DAYS);
+  }, [identityKey]);
 
   // Successful sign-in returns to the account task list; sign-out leaves the account sub-screen.
   // An expired confirmation redirect is signed-out with `redirectError` — open Sign in once.
@@ -150,18 +162,23 @@ function AccountAwareScreen({
         );
       }
       return (
-        <View style={styles.signedIn}>
-          <GuestTaskAdoptionBanner repository={guestTaskAdoption} userId={authState.user.id} />
-          <HomeScreen
-            repository={userTasks}
-            account={{
-              kind: 'account',
-              label: authState.user.email ?? 'Account',
-              onPress: () => setScreen({ name: 'account' }),
-            }}
-            sync={sync}
-          />
-        </View>
+        <HomeScreen
+          key={identityKey}
+          repository={userTasks}
+          destination={destination}
+          onDestinationChange={setDestination}
+          upcomingDays={upcomingDays}
+          onLoadMoreUpcoming={() => setUpcomingDays((days) => days + UPCOMING_PAGE_DAYS)}
+          banner={
+            <GuestTaskAdoptionBanner repository={guestTaskAdoption} userId={authState.user.id} />
+          }
+          account={{
+            kind: 'account',
+            label: authState.user.email ?? 'Account',
+            onPress: () => setScreen({ name: 'account' }),
+          }}
+          sync={sync}
+        />
       );
     case 'signed-out':
       break;
@@ -171,7 +188,12 @@ function AccountAwareScreen({
     case undefined:
       return (
         <HomeScreen
+          key={identityKey}
           repository={tasks.guest}
+          destination={destination}
+          onDestinationChange={setDestination}
+          upcomingDays={upcomingDays}
+          onLoadMoreUpcoming={() => setUpcomingDays((days) => days + UPCOMING_PAGE_DAYS)}
           account={{ kind: 'sign-in', onPress: () => setScreen({ name: 'sign-in' }) }}
         />
       );
@@ -216,11 +238,31 @@ function AccountAwareScreen({
     case 'change-password':
       return (
         <HomeScreen
+          key={identityKey}
           repository={tasks.guest}
+          destination={destination}
+          onDestinationChange={setDestination}
+          upcomingDays={upcomingDays}
+          onLoadMoreUpcoming={() => setUpcomingDays((days) => days + UPCOMING_PAGE_DAYS)}
           account={{ kind: 'sign-in', onPress: () => setScreen({ name: 'sign-in' }) }}
         />
       );
   }
+}
+
+function GuestHome({ repository, account }: { repository: TaskRepository; account: AccountEntry }) {
+  const [destination, setDestination] = useState<TaskDestination>('inbox');
+  const [upcomingDays, setUpcomingDays] = useState(UPCOMING_PAGE_DAYS);
+  return (
+    <HomeScreen
+      repository={repository}
+      account={account}
+      destination={destination}
+      onDestinationChange={setDestination}
+      upcomingDays={upcomingDays}
+      onLoadMoreUpcoming={() => setUpcomingDays((days) => days + UPCOMING_PAGE_DAYS)}
+    />
+  );
 }
 
 /** True only for the signed-in account whose ownership check/clear has finished. */
@@ -231,7 +273,3 @@ function useAccountLocalDataReady(sync: SyncStatusSource, userId: string | null)
     () => canWriteAccountTasks(userId, sync),
   );
 }
-
-const styles = StyleSheet.create({
-  signedIn: { flex: 1 },
-});

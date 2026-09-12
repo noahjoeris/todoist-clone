@@ -343,6 +343,36 @@ guest `local_tasks` and account-owned `tasks`.
   account reads/writes are owner-scoped. Offline writes land in SQLite;
   account changes sync through the existing upload endpoint.
 
+### ADR-018 Reanimated is the shared native/web animation library
+
+The Inbox / Today / Upcoming shell needs a narrow-screen navigation drawer that
+slides from the leading edge with a fading backdrop on iOS, Android, and web.
+React Native Reanimated (with `react-native-worklets`) is that animation runtime,
+and the choice for later UI-thread motion.
+
+Consequences:
+
+- **UI-only ownership.** Animation code lives in `src/ui` (the drawer, beside
+  `AppShell` / `Sidebar`). Repository writes, PowerSync, sync, and Undo never wait
+  on animation completion. Changing destination happens as soon as any draft-discard
+  check succeeds; close motion is presentation only.
+- **SDK-compatible install.** Add packages with
+  `pnpm --filter @todoist-clone/client exec expo install react-native-reanimated react-native-worklets`
+  so versions match Expo SDK 57
+  ([setup](https://docs.expo.dev/versions/v57.0.0/sdk/reanimated/)).
+  `babel-preset-expo` enables the Worklets/Reanimated plugin automatically; do not
+  add a duplicate plugin. Keep the PowerSync async-generator Babel transform and
+  Metro native/web SDK exclusions.
+- **Native rebuild.** Reanimated includes native code. Rebuild the development
+  client after adding it. Expo Go is already insufficient because of PowerSync.
+- **Reduced motion.** Use `ReduceMotion.System`; do not force `Never`. Skip
+  transitions when the system or browser preference is on, but still run close
+  cleanup and focus restore. Subscribe to preference changes at runtime;
+  `useReducedMotion` alone only snapshots the startup setting
+  ([accessibility](https://docs.swmansion.com/react-native-reanimated/docs/guides/accessibility/)).
+- **Drawer only.** Swipe-to-dismiss, Gesture Handler, task-row animations, and a
+  general motion framework are follow-ups.
+
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,
