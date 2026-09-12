@@ -73,25 +73,144 @@ export const taskPatchColumnsSchema = z
     message: 'scheduled_time requires scheduled_date',
   });
 
-const crudEntryBaseSchema = z.object({
-  clientId: z.number().int(),
-  table: z.literal('tasks'),
-  id: z.uuid(),
-});
+/** Todoist 20-color palette. Default on create is `charcoal`. */
+export const LABEL_COLORS = [
+  'berry_red',
+  'red',
+  'orange',
+  'yellow',
+  'olive_green',
+  'lime_green',
+  'green',
+  'mint_green',
+  'teal',
+  'sky_blue',
+  'light_blue',
+  'blue',
+  'grape',
+  'violet',
+  'lavender',
+  'magenta',
+  'salmon',
+  'charcoal',
+  'grey',
+  'taupe',
+] as const;
 
-export const crudEntrySchema = z.discriminatedUnion('op', [
-  crudEntryBaseSchema.extend({
+export const labelColorSchema = z.enum(LABEL_COLORS);
+
+/**
+ * PowerSync SQLite stores booleans as integer 0/1. Convert those explicitly;
+ * do not coerce other truthy/falsy values.
+ */
+export function normalizeSqliteBoolean(value: unknown): unknown {
+  if (value === 0) return false;
+  if (value === 1) return true;
+  return value;
+}
+
+const wireBoolean = z.preprocess(normalizeSqliteBoolean, z.boolean());
+
+/**
+ * PowerSync SQLite / upload-wire columns for `labels`.
+ * `id`, `user_id` and `updated_at` are stripped if present — the server owns them.
+ */
+export const labelColumnsSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60),
+    color: labelColorSchema.default('charcoal'),
+    is_favorite: wireBoolean.default(false),
+    created_at: wireDatetime,
+  })
+  .strip();
+
+export const labelPatchColumnsSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60).optional(),
+    color: labelColorSchema.optional(),
+    is_favorite: wireBoolean.optional(),
+    created_at: wireDatetime.optional(),
+  })
+  .strip();
+
+/**
+ * PowerSync SQLite / upload-wire columns for `task_labels`.
+ * Links support PUT/DELETE only. `id` and `user_id` are stripped if present.
+ */
+export const taskLabelColumnsSchema = z
+  .object({
+    task_id: z.uuid(),
+    label_id: z.uuid(),
+    created_at: wireDatetime,
+  })
+  .strip();
+
+const crudEntryBase = {
+  clientId: z.number().int(),
+  id: z.uuid(),
+};
+
+const taskCrudEntrySchema = z.discriminatedUnion('op', [
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('tasks'),
     op: z.literal('PUT'),
     opData: taskColumnsSchema,
   }),
-  crudEntryBaseSchema.extend({
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('tasks'),
     op: z.literal('PATCH'),
     opData: taskPatchColumnsSchema,
   }),
-  crudEntryBaseSchema.extend({
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('tasks'),
     op: z.literal('DELETE'),
     opData: z.unknown().nullable().optional(),
   }),
+]);
+
+const labelCrudEntrySchema = z.discriminatedUnion('op', [
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('labels'),
+    op: z.literal('PUT'),
+    opData: labelColumnsSchema,
+  }),
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('labels'),
+    op: z.literal('PATCH'),
+    opData: labelPatchColumnsSchema,
+  }),
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('labels'),
+    op: z.literal('DELETE'),
+    opData: z.unknown().nullable().optional(),
+  }),
+]);
+
+const taskLabelCrudEntrySchema = z.discriminatedUnion('op', [
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('task_labels'),
+    op: z.literal('PUT'),
+    opData: taskLabelColumnsSchema,
+  }),
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('task_labels'),
+    op: z.literal('DELETE'),
+    opData: z.unknown().nullable().optional(),
+  }),
+]);
+
+export const crudEntrySchema = z.union([
+  taskCrudEntrySchema,
+  labelCrudEntrySchema,
+  taskLabelCrudEntrySchema,
 ]);
 
 export const uploadRequestSchema = z.object({
@@ -117,6 +236,10 @@ export const uploadErrorSchema = z.object({
 
 export type TaskColumns = z.infer<typeof taskColumnsSchema>;
 export type TaskPatchColumns = z.infer<typeof taskPatchColumnsSchema>;
+export type LabelColor = (typeof LABEL_COLORS)[number];
+export type LabelColumns = z.infer<typeof labelColumnsSchema>;
+export type LabelPatchColumns = z.infer<typeof labelPatchColumnsSchema>;
+export type TaskLabelColumns = z.infer<typeof taskLabelColumnsSchema>;
 export type CrudEntry = z.infer<typeof crudEntrySchema>;
 export type UploadRequest = z.infer<typeof uploadRequestSchema>;
 export type UploadResponse = z.infer<typeof uploadResponseSchema>;

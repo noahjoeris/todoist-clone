@@ -20,6 +20,7 @@ import { loadEnv } from '../../src/config/env.js';
 
 export const OWNER_ID = '11111111-1111-4111-8111-111111111111';
 export const OTHER_ID = '22222222-2222-4222-8222-222222222222';
+export const CASCADE_ID = '33333333-3333-4333-8333-333333333333';
 
 const CREATED_AT = '2026-09-11T12:00:00.000Z';
 
@@ -45,6 +46,59 @@ export function putOp(
       priority: 4,
       scheduled_date: null,
       scheduled_time: null,
+      created_at: CREATED_AT,
+      ...opData,
+    },
+  };
+}
+
+export function putLabelOp(
+  id: string,
+  opData: Record<string, unknown> = {},
+  clientId = 1,
+): {
+  clientId: number;
+  op: 'PUT';
+  table: 'labels';
+  id: string;
+  opData: Record<string, unknown>;
+} {
+  return {
+    clientId,
+    op: 'PUT',
+    table: 'labels',
+    id,
+    opData: {
+      name: 'Work',
+      color: 'charcoal',
+      is_favorite: false,
+      created_at: CREATED_AT,
+      ...opData,
+    },
+  };
+}
+
+export function putTaskLabelOp(
+  id: string,
+  taskId: string,
+  labelId: string,
+  opData: Record<string, unknown> = {},
+  clientId = 1,
+): {
+  clientId: number;
+  op: 'PUT';
+  table: 'task_labels';
+  id: string;
+  opData: Record<string, unknown>;
+} {
+  return {
+    clientId,
+    op: 'PUT',
+    table: 'task_labels',
+    id,
+    opData: {
+      task_id: taskId,
+      label_id: labelId,
       created_at: CREATED_AT,
       ...opData,
     },
@@ -98,6 +152,28 @@ export async function loadTask(id: string) {
   };
 }
 
+export async function loadLabel(id: string) {
+  const [row] = await database.db.select().from(schema.labels).where(eq(schema.labels.id, id));
+  if (!row) return null;
+  return {
+    ...row,
+    createdAt: toIsoInstant(row.createdAt),
+    updatedAt: toIsoInstant(row.updatedAt),
+  };
+}
+
+export async function loadTaskLabel(id: string) {
+  const [row] = await database.db
+    .select()
+    .from(schema.taskLabels)
+    .where(eq(schema.taskLabels.id, id));
+  if (!row) return null;
+  return {
+    ...row,
+    createdAt: toIsoInstant(row.createdAt),
+  };
+}
+
 beforeAll(async () => {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -114,7 +190,7 @@ beforeAll(async () => {
 
   await database.db.execute(sql`SET session_replication_role = replica`);
   await database.db.execute(
-    sql`INSERT INTO auth.users (id) VALUES (${OWNER_ID}::uuid), (${OTHER_ID}::uuid) ON CONFLICT (id) DO NOTHING`,
+    sql`INSERT INTO auth.users (id) VALUES (${OWNER_ID}::uuid), (${OTHER_ID}::uuid), (${CASCADE_ID}::uuid) ON CONFLICT (id) DO NOTHING`,
   );
   await database.db.execute(sql`SET session_replication_role = DEFAULT`);
 
@@ -134,7 +210,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await database.db.execute(sql`TRUNCATE public.tasks`);
+  await database.db.execute(sql`TRUNCATE public.task_labels, public.labels, public.tasks`);
 });
 
 afterAll(async () => {
