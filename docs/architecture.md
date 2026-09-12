@@ -287,8 +287,8 @@ the token never reaches the UI or `AuthRepository`. Consequences:
   is stripped of trailing slashes and joined with `URL` so `EXPO_PUBLIC_API_URL` values
   like `http://localhost:3000/` do not become `//sync/upload`. Do not
   `JSON.stringify` a `CrudEntry` (`toJSON()` emits `op_id/type/tx_id/data`). Local-only
-  tables never write `ps_crud`. Synced uploads are `tasks`, `labels`, and `task_labels`
-  through the same connector (no table filter).
+  tables never write `ps_crud`. Synced uploads are `tasks`, `labels`, `task_labels`,
+  and `projects` through the same connector (no table filter).
 - **HTTP.** 2xx → `complete()`. 400/403 → `console.error` the body and `complete()`.
   401 → throw (retry). 5xx / network → throw (retry).
 - **Sign-out with a non-empty upload queue.** The primary action stays disabled until
@@ -471,6 +471,65 @@ Consequences:
   CORS/Auth entries. Do not expose deploy secrets to fork code.
 
 Runbook, secret names, and smoke checklist: README "Preview / QA".
+
+### ADR-021 Personal projects with nullable Inbox membership
+
+Account tasks need a primary container independent of labels (#16 / #17). Projects are
+flat, personal, account-owned rows (`public.projects`) with nullable membership on
+`tasks.project_id`. The companion client enhancement is #29; this ADR is extended
+there with repository and UI details rather than split into a second decision.
+
+- **Inbox is null, not a project.** Todoist gives every task a `project_id`, including
+  a special Inbox project (`is_inbox_project` / `user.inbox_project_id`). This clone
+  uses SQL NULL. That matches `docs/task-views.md` (Inbox is every task without a
+  project, including scheduled ones) and avoids seeded Inbox rows, backfilling
+  existing tasks, and Inbox-project UX (rename, favorite, archive, delete). Guest
+  `local_tasks` and adoption stay project-free: adoption copies into Inbox.
+- **Shape.** Client-generated UUID (ADR-006). Trimmed name, 1–60 characters, unique
+  per user case-insensitively including archived rows
+  (`UNIQUE (user_id, lower(name))`). Labels and projects are separate namespaces.
+  Color reuses Todoist's 20-name palette (default `charcoal`). `is_favorite` and
+  `is_archived` are booleans; `sort_order` is a nonnegative 32-bit integer (ties
+  allowed). No `parent_id`, `section_id`, `view_style`, or other speculative
+  columns. Listing order is `sort_order ASC, id ASC`; concurrent writes to the
+  same position converge by normal server application order.
+- **Membership.** A task belongs to at most one project. PUT omission or null is
+  Inbox (PowerSync omits nulls). PATCH omission leaves membership unchanged;
+  explicit null moves to Inbox. Moving a task does not change labels, dates,
+  priority, or completion. The destination must exist and belong to the task
+  owner; missing or foreign non-null refs are 403, never an unhandled FK 500.
+  Archived projects remain valid destinations so an offline create still uploads
+  after another device archives. Archive is not an authorization boundary.
+- **Archive.** A reversible `is_archived` flag. Archived rows stay in the
+  `user_projects` stream with their tasks, names, order, and favorite flags. The
+  client hides them from My Projects, Favorites, and new picker choices. Archive
+  does not complete, suspend, or Inbox-reassign tasks. Today, Upcoming, and label
+  views stay cross-project, including archived membership. Inbox remains null
+  membership, not archived membership.
+- **Deletion.** Owned project DELETE locks the project, clears remaining
+  `tasks.project_id` (active and completed) and bumps those `updated_at`, then
+  deletes the project. Task rows and `task_labels` survive. `ON DELETE SET NULL`
+  is referential protection for other database paths. Missing DELETE is a no-op.
+  A later task write that still names the deleted project is 403 — no silent
+  reassignment. User delete still cascades account data via `auth.users`.
+- **Authorization and locks.** RLS enabled with no client policies (ADR-002).
+  Referenced-project `FOR UPDATE` is taken before dependent task locks on
+  membership writes and project delete, so a concurrent delete cannot pass a
+  lookup then fail the FK. Foreign project CRUD is 403 and rolls back the whole
+  batch (ADR-014). Duplicate names are 400 `invalid-request` with a `name` field
+  issue, not merge or suffix. Two offline devices colliding on the same owner's
+  name lose the whole queued transaction under the connector policy (400 →
+  `complete()`, ADR-014 / ADR-019); local validation covers ordinary duplicates.
+- **Sync.** Stream `user_projects` is `SELECT * FROM projects WHERE user_id =
+  auth.user_id()` (archived rows included). `user_tasks` already selects `*` so
+  it carries `project_id`. Publication, GRANT SELECT, client SQLite declarations
+  (`is_favorite` / `is_archived` / `sort_order` as integer; `project_id` on
+  synced `tasks` only), and this table land together (ADR-003 / ADR-005). The
+  existing connector uploads every synced table; no new transport. Client
+  queue order is project PUT, then task PUT/PATCH, then task-label PUTs.
+- **Existing features.** Task lifecycle/views (#13 / #14) and labels (#16 / #17)
+  stay as they are. Sections, nested projects, sharing, and guest projects are
+  deferred.
 
 ## Deferred
 

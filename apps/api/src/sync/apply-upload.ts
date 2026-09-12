@@ -1,5 +1,6 @@
 import type { CrudEntry } from '@todoist-clone/contracts';
 import { applyLabelOperation } from './apply-label.js';
+import { applyProjectOperation } from './apply-project.js';
 import { applyTaskOperation } from './apply-task.js';
 import { applyTaskLabelOperation } from './apply-task-label.js';
 import type { UploadExecutor } from './types.js';
@@ -21,6 +22,9 @@ export async function applyUpload(
         break;
       case 'task_labels':
         await applyTaskLabelOperation(tx, userId, operation);
+        break;
+      case 'projects':
+        await applyProjectOperation(tx, userId, operation);
         break;
     }
   }

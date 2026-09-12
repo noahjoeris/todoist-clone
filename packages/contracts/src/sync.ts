@@ -39,6 +39,8 @@ export type ScheduledColumns = {
  *
  * `completed_at` is a client-owned timestamp. PUT omission or null means active
  * (PowerSync omits nulls). PATCH omission means unchanged; explicit null reopens.
+ * `project_id` is nullable membership: PUT omission or null means Inbox; PATCH
+ * omission leaves membership unchanged; explicit null moves to Inbox.
  * `created_at` / `completed_at` accept PowerSync's space-separated timestamptz.
  */
 export const taskColumnsSchema = z
@@ -50,6 +52,7 @@ export const taskColumnsSchema = z
     scheduled_time: scheduledTimeSchema.nullable().optional(),
     completed_at: wireDatetime.nullable().optional(),
     created_at: wireDatetime,
+    project_id: z.uuid().nullable().optional(),
   })
   .strip()
   .refine(timeRequiresDate, {
@@ -66,6 +69,7 @@ export const taskPatchColumnsSchema = z
     scheduled_time: scheduledTimeSchema.nullable().optional(),
     completed_at: wireDatetime.nullable().optional(),
     created_at: wireDatetime.optional(),
+    project_id: z.uuid().nullable().optional(),
   })
   .strip()
   .refine(patchTimeRequiresDate, {
@@ -129,6 +133,34 @@ export const labelPatchColumnsSchema = z
     name: z.string().trim().min(1).max(60).optional(),
     color: labelColorSchema.optional(),
     is_favorite: wireBoolean.optional(),
+    created_at: wireDatetime.optional(),
+  })
+  .strip();
+
+const sortOrderSchema = z.number().int().min(0).max(2147483647);
+
+/**
+ * PowerSync SQLite / upload-wire columns for `projects`.
+ * `id`, `user_id` and `updated_at` are stripped if present — the server owns them.
+ */
+export const projectColumnsSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60),
+    color: labelColorSchema.default('charcoal'),
+    is_favorite: wireBoolean.default(false),
+    is_archived: wireBoolean.default(false),
+    sort_order: sortOrderSchema.default(0),
+    created_at: wireDatetime,
+  })
+  .strip();
+
+export const projectPatchColumnsSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60).optional(),
+    color: labelColorSchema.optional(),
+    is_favorite: wireBoolean.optional(),
+    is_archived: wireBoolean.optional(),
+    sort_order: sortOrderSchema.optional(),
     created_at: wireDatetime.optional(),
   })
   .strip();
@@ -207,10 +239,32 @@ const taskLabelCrudEntrySchema = z.discriminatedUnion('op', [
   }),
 ]);
 
+const projectCrudEntrySchema = z.discriminatedUnion('op', [
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('projects'),
+    op: z.literal('PUT'),
+    opData: projectColumnsSchema,
+  }),
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('projects'),
+    op: z.literal('PATCH'),
+    opData: projectPatchColumnsSchema,
+  }),
+  z.object({
+    ...crudEntryBase,
+    table: z.literal('projects'),
+    op: z.literal('DELETE'),
+    opData: z.unknown().nullable().optional(),
+  }),
+]);
+
 export const crudEntrySchema = z.union([
   taskCrudEntrySchema,
   labelCrudEntrySchema,
   taskLabelCrudEntrySchema,
+  projectCrudEntrySchema,
 ]);
 
 export const uploadRequestSchema = z.object({
@@ -239,6 +293,8 @@ export type TaskPatchColumns = z.infer<typeof taskPatchColumnsSchema>;
 export type LabelColor = (typeof LABEL_COLORS)[number];
 export type LabelColumns = z.infer<typeof labelColumnsSchema>;
 export type LabelPatchColumns = z.infer<typeof labelPatchColumnsSchema>;
+export type ProjectColumns = z.infer<typeof projectColumnsSchema>;
+export type ProjectPatchColumns = z.infer<typeof projectPatchColumnsSchema>;
 export type TaskLabelColumns = z.infer<typeof taskLabelColumnsSchema>;
 export type CrudEntry = z.infer<typeof crudEntrySchema>;
 export type UploadRequest = z.infer<typeof uploadRequestSchema>;

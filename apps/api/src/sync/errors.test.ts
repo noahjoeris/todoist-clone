@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isUniqueViolation, LABELS_NAME_UNIQUE, TASK_LABELS_PAIR_UNIQUE } from './errors.js';
+import {
+  isUniqueViolation,
+  LABELS_NAME_UNIQUE,
+  PROJECTS_NAME_UNIQUE,
+  TASK_LABELS_PAIR_UNIQUE,
+} from './errors.js';
 
 describe('isUniqueViolation', () => {
   it('matches a postgres-js unique violation by constraint_name', () => {
@@ -8,6 +13,7 @@ describe('isUniqueViolation', () => {
       constraint_name: LABELS_NAME_UNIQUE,
     });
     expect(isUniqueViolation(error, LABELS_NAME_UNIQUE)).toBe(true);
+    expect(isUniqueViolation(error, PROJECTS_NAME_UNIQUE)).toBe(false);
     expect(isUniqueViolation(error, TASK_LABELS_PAIR_UNIQUE)).toBe(false);
   });
 

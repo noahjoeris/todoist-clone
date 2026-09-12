@@ -10,6 +10,7 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { projects } from './projects.js';
 
 /**
  * Raw SQL appended to the generated migration (drizzle-kit cannot model `auth`):
@@ -27,6 +28,7 @@ export const tasks = pgTable(
   {
     id: uuid('id').primaryKey(),
     userId: uuid('user_id').notNull(),
+    projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
     title: text('title').notNull(),
     description: text('description').notNull().default(''),
     priority: smallint('priority').notNull().default(4),
@@ -42,6 +44,8 @@ export const tasks = pgTable(
   },
   (table) => [
     index('tasks_user_id_created_at_idx').on(table.userId, table.createdAt.desc()),
+    index('tasks_user_id_project_id_idx').on(table.userId, table.projectId),
+    index('tasks_project_id_idx').on(table.projectId),
     check('tasks_priority_range', sql`${table.priority} BETWEEN 1 AND 4`),
     check(
       'tasks_scheduled_time_requires_date',

@@ -147,7 +147,7 @@ describe('POST /sync/upload', () => {
           {
             clientId: 1,
             op: 'PUT',
-            table: 'projects',
+            table: 'sections',
             id: TASK_ID,
             opData: {
               title: 'Nope',

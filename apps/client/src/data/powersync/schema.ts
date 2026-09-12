@@ -28,6 +28,7 @@ const localPreferences = new Table({ value: column.text }, { localOnly: true });
 // Account-owned rows. Mirrors public.tasks and the user_tasks Sync Stream.
 const tasks = new Table({
   user_id: column.text,
+  project_id: column.text,
   title: column.text,
   description: column.text,
   priority: column.integer,
@@ -57,12 +58,26 @@ const taskLabels = new Table({
   created_at: column.text,
 });
 
+// Account-owned projects. Mirrors public.projects and the user_projects Sync Stream.
+// SQLite stores boolean `is_favorite` / `is_archived` as integer (PowerSync convention).
+const projects = new Table({
+  user_id: column.text,
+  name: column.text,
+  color: column.text,
+  is_favorite: column.integer,
+  sort_order: column.integer,
+  is_archived: column.integer,
+  created_at: column.text,
+  updated_at: column.text,
+});
+
 export const appSchema = new Schema({
   local_tasks: localTasks,
   local_preferences: localPreferences,
   tasks,
   labels,
   task_labels: taskLabels,
+  projects,
 });
 
 export type AppDatabaseTypes = (typeof appSchema)['types'];

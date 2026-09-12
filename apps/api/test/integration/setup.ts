@@ -78,6 +78,34 @@ export function putLabelOp(
   };
 }
 
+export function putProjectOp(
+  id: string,
+  opData: Record<string, unknown> = {},
+  clientId = 1,
+): {
+  clientId: number;
+  op: 'PUT';
+  table: 'projects';
+  id: string;
+  opData: Record<string, unknown>;
+} {
+  return {
+    clientId,
+    op: 'PUT',
+    table: 'projects',
+    id,
+    opData: {
+      name: 'Work',
+      color: 'charcoal',
+      is_favorite: false,
+      is_archived: false,
+      sort_order: 0,
+      created_at: CREATED_AT,
+      ...opData,
+    },
+  };
+}
+
 export function putTaskLabelOp(
   id: string,
   taskId: string,
@@ -162,6 +190,16 @@ export async function loadLabel(id: string) {
   };
 }
 
+export async function loadProject(id: string) {
+  const [row] = await database.db.select().from(schema.projects).where(eq(schema.projects.id, id));
+  if (!row) return null;
+  return {
+    ...row,
+    createdAt: toIsoInstant(row.createdAt),
+    updatedAt: toIsoInstant(row.updatedAt),
+  };
+}
+
 export async function loadTaskLabel(id: string) {
   const [row] = await database.db
     .select()
@@ -210,7 +248,9 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await database.db.execute(sql`TRUNCATE public.task_labels, public.labels, public.tasks`);
+  await database.db.execute(
+    sql`TRUNCATE public.task_labels, public.labels, public.tasks, public.projects`,
+  );
 });
 
 afterAll(async () => {
