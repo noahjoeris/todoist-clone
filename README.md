@@ -26,14 +26,17 @@ compose.local.yaml      Local overlays (ES256 JWT on auth, PowerSync) + API
 ## Setup
 
 The client currently supports local guest tasks (title, description, priority, date and optional
-time) with a live list: complete and reopen from the checkbox, edit from the task, and delete
-with an 8-second Undo. Completed tasks sit in a collapsed section. Email/password accounts
-with email-link confirmation, password reset, email change, and persistent sessions are
+time) in Inbox, Today, and Upcoming: complete and reopen from the checkbox, edit from the task,
+quick reschedule (Today / Tomorrow / Choose date / No date), and delete with an 8-second Undo.
+Completed tasks sit in a collapsed section that follows the current view. A persistent sidebar
+appears from 900 logical pixels; narrower screens use a menu and overlay drawer. Email/password
+accounts with email-link confirmation, password reset, email change, and persistent sessions are
 available when cloud env is set. Guest tasks stay on the device and are hidden while signed
 in; after sign-in the app offers to add them to the account (or skip / don't ask again),
 preserving completion. Signed-in users sync account-owned tasks through PowerSync, including
 completion and restores. Guest-only use needs no `.env`: run `pnpm install`,
 `pnpm build`, then `pnpm --filter @todoist-clone/client web` (or a native development build).
+View membership, ordering, and create defaults: [docs/task-views.md](docs/task-views.md).
 
 This project is pre-release: schema changes replace the initial Drizzle migration in place.
 Reset local SQLite (reinstall / clear site data) and re-run `pnpm db:migrate` against a
@@ -130,6 +133,15 @@ curl -H "Authorization: Bearer <access_token>" http://localhost:3000/me
 
 On web the access token is in `localStorage` under `sb-<project-ref>-auth-token`. After
 sign-in, creating an account task should POST it to `/sync/upload` and show **Synced**.
+
+### Native development builds
+
+PowerSync’s native SQLite and React Native Reanimated both require a development build
+(not Expo Go). After adding or upgrading native modules, including Reanimated / Worklets
+(`pnpm --filter @todoist-clone/client exec expo install react-native-reanimated react-native-worklets`),
+rebuild the client (`pnpm --filter @todoist-clone/client ios` or `android`).
+SDK 57’s `babel-preset-expo` configures the Reanimated/Worklets Babel plugin automatically;
+do not add that plugin by hand. See [Expo SDK 57 Reanimated](https://docs.expo.dev/versions/v57.0.0/sdk/reanimated/).
 
 ## Commands
 
