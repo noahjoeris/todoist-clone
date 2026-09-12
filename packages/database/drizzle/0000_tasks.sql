@@ -6,6 +6,7 @@ CREATE TABLE "tasks" (
 	"priority" smallint DEFAULT 4 NOT NULL,
 	"scheduled_date" date,
 	"scheduled_time" time(0),
+	"completed_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "tasks_priority_range" CHECK ("tasks"."priority" BETWEEN 1 AND 4),

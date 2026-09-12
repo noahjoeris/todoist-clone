@@ -29,6 +29,7 @@ type LocalTaskRow = {
   priority: number;
   scheduled_date: string | null;
   scheduled_time: string | null;
+  completed_at: string | null;
   created_at: string;
 };
 
@@ -99,14 +100,14 @@ export function createGuestTaskAdoptionRepository(
     async adopt(userId) {
       const copied = await database.writeTransaction(async (tx) => {
         const rows = await tx.getAll<LocalTaskRow>(
-          `SELECT id, title, description, priority, scheduled_date, scheduled_time, created_at
+          `SELECT id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at
            FROM local_tasks`,
         );
         for (const row of rows) {
           await tx.execute(
             `INSERT INTO tasks
-              (id, user_id, title, description, priority, scheduled_date, scheduled_time, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (id, user_id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               row.id,
               userId,
@@ -115,6 +116,7 @@ export function createGuestTaskAdoptionRepository(
               row.priority,
               row.scheduled_date,
               row.scheduled_time,
+              row.completed_at,
               row.created_at,
               row.created_at,
             ],

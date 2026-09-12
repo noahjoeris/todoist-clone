@@ -2,6 +2,17 @@ import { z } from 'zod';
 
 const scheduledTimeSchema = z.union([z.iso.time({ precision: -1 }), z.iso.time({ precision: 0 })]);
 
+/**
+ * PowerSync maps Postgres timestamptz to SQLite text as `YYYY-MM-DD hh:mm:ss.sssZ`
+ * (space separator). RFC 3339 and `z.iso.datetime` require `T`.
+ */
+function normalizePowerSyncTimestamptz(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  return value.replace(/^(\d{4}-\d{2}-\d{2}) (\d)/, '$1T$2');
+}
+
+const wireDatetime = z.preprocess(normalizePowerSyncTimestamptz, z.iso.datetime({ offset: true }));
+
 function timeRequiresDate(task: {
   scheduled_date?: string | null | undefined;
   scheduled_time?: string | null | undefined;
@@ -25,6 +36,10 @@ export type ScheduledColumns = {
 /**
  * PowerSync SQLite / upload-wire columns for `tasks`.
  * `id`, `user_id` and `updated_at` are stripped if present — the server owns them.
+ *
+ * `completed_at` is a client-owned timestamp. PUT omission or null means active
+ * (PowerSync omits nulls). PATCH omission means unchanged; explicit null reopens.
+ * `created_at` / `completed_at` accept PowerSync's space-separated timestamptz.
  */
 export const taskColumnsSchema = z
   .object({
@@ -33,7 +48,8 @@ export const taskColumnsSchema = z
     priority: z.number().int().min(1).max(4),
     scheduled_date: z.iso.date().nullable().optional(),
     scheduled_time: scheduledTimeSchema.nullable().optional(),
-    created_at: z.iso.datetime({ offset: true }),
+    completed_at: wireDatetime.nullable().optional(),
+    created_at: wireDatetime,
   })
   .strip()
   .refine(timeRequiresDate, {
@@ -48,7 +64,8 @@ export const taskPatchColumnsSchema = z
     priority: z.number().int().min(1).max(4).optional(),
     scheduled_date: z.iso.date().nullable().optional(),
     scheduled_time: scheduledTimeSchema.nullable().optional(),
-    created_at: z.iso.datetime({ offset: true }).optional(),
+    completed_at: wireDatetime.nullable().optional(),
+    created_at: wireDatetime.optional(),
   })
   .strip()
   .refine(patchTimeRequiresDate, {

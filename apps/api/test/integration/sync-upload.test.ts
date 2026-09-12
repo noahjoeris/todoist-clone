@@ -215,4 +215,195 @@ describe('POST /sync/upload (integration)', () => {
     expect(row?.userId).toBe(OWNER_ID);
     expect(row?.updatedAt.startsWith('2000-01-01')).toBe(false);
   });
+
+  it('PUT with omitted completed_at stores an active task', async () => {
+    const response = await upload(OWNER_ID, [putOp(OWN_ID, { title: 'Active' })]);
+    expect(response.statusCode).toBe(200);
+    expect((await loadTask(OWN_ID))?.completedAt).toBeNull();
+  });
+
+  it('PUT with completed_at stores the client timestamp', async () => {
+    const completedAt = '2026-09-11T15:00:00.000Z';
+    const response = await upload(OWNER_ID, [putOp(OWN_ID, { completed_at: completedAt })]);
+    expect(response.statusCode).toBe(200);
+    const row = await loadTask(OWN_ID);
+    expect(row?.completedAt).toBe(completedAt);
+    expect(row?.scheduledDate).toBeNull();
+  });
+
+  it('PATCH completed_at completes and explicit null reopens without clearing other fields', async () => {
+    await upload(OWNER_ID, [
+      putOp(OWN_ID, {
+        title: 'Keep me',
+        description: 'Notes',
+        priority: 2,
+        scheduled_date: '2026-09-11',
+        scheduled_time: '09:00',
+      }),
+    ]);
+
+    const completedAt = '2026-09-11T16:00:00.000Z';
+    const complete = await upload(OWNER_ID, [
+      {
+        clientId: 2,
+        op: 'PATCH',
+        table: 'tasks',
+        id: OWN_ID,
+        opData: { completed_at: completedAt },
+      },
+    ]);
+    expect(complete.statusCode).toBe(200);
+    const completed = await loadTask(OWN_ID);
+    expect(completed).toMatchObject({
+      title: 'Keep me',
+      description: 'Notes',
+      priority: 2,
+      scheduledDate: '2026-09-11',
+      completedAt,
+    });
+    expect(completed?.scheduledTime?.startsWith('09:00')).toBe(true);
+
+    const reopen = await upload(OWNER_ID, [
+      {
+        clientId: 3,
+        op: 'PATCH',
+        table: 'tasks',
+        id: OWN_ID,
+        opData: { completed_at: null },
+      },
+    ]);
+    expect(reopen.statusCode).toBe(200);
+    const reopened = await loadTask(OWN_ID);
+    expect(reopened?.completedAt).toBeNull();
+    expect(reopened?.title).toBe('Keep me');
+    expect(reopened?.scheduledDate).toBe('2026-09-11');
+    expect(reopened?.scheduledTime?.startsWith('09:00')).toBe(true);
+  });
+
+  it('PATCH of title does not change completed_at', async () => {
+    const completedAt = '2026-09-11T16:00:00.000Z';
+    await upload(OWNER_ID, [putOp(OWN_ID, { title: 'Before', completed_at: completedAt })]);
+
+    const response = await upload(OWNER_ID, [
+      { clientId: 2, op: 'PATCH', table: 'tasks', id: OWN_ID, opData: { title: 'After' } },
+    ]);
+    expect(response.statusCode).toBe(200);
+    const row = await loadTask(OWN_ID);
+    expect(row?.title).toBe('After');
+    expect(row?.completedAt).toBe(completedAt);
+  });
+
+  it("PATCH of another user's completed_at returns 403 and rolls back earlier PUTs", async () => {
+    await upload(OTHER_ID, [putOp(OTHER_TASK_ID, { title: 'Other' })]);
+
+    const response = await upload(OWNER_ID, [
+      putOp(OWN_ID, { title: 'Should not stick' }),
+      {
+        clientId: 2,
+        op: 'PATCH',
+        table: 'tasks',
+        id: OTHER_TASK_ID,
+        opData: { completed_at: '2026-09-11T16:00:00.000Z' },
+      },
+    ]);
+    expect(response.statusCode).toBe(403);
+    expect(await loadTask(OWN_ID)).toBeNull();
+    expect((await loadTask(OTHER_TASK_ID))?.completedAt).toBeNull();
+  });
+
+  it('applies ordered DELETE then restore PUT, including a retry of the same batch', async () => {
+    await upload(OWNER_ID, [
+      putOp(OWN_ID, {
+        title: 'Original',
+        description: 'Keep',
+        priority: 1,
+        scheduled_date: '2026-09-11',
+        scheduled_time: '14:30',
+        completed_at: '2026-09-11T15:00:00.000Z',
+        created_at: '2026-09-10T12:00:00.000Z',
+      }),
+    ]);
+
+    const restoreBatch = [
+      { clientId: 2, op: 'DELETE' as const, table: 'tasks' as const, id: OWN_ID, opData: null },
+      putOp(
+        OWN_ID,
+        {
+          title: 'Original',
+          description: 'Keep',
+          priority: 1,
+          scheduled_date: '2026-09-11',
+          scheduled_time: '14:30',
+          completed_at: '2026-09-11T15:00:00.000Z',
+          created_at: '2026-09-10T12:00:00.000Z',
+        },
+        3,
+      ),
+    ];
+
+    const first = await upload(OWNER_ID, restoreBatch);
+    expect(first.statusCode).toBe(200);
+    const restored = await loadTask(OWN_ID);
+    expect(restored).toMatchObject({
+      id: OWN_ID,
+      userId: OWNER_ID,
+      title: 'Original',
+      description: 'Keep',
+      priority: 1,
+      scheduledDate: '2026-09-11',
+      completedAt: '2026-09-11T15:00:00.000Z',
+      createdAt: '2026-09-10T12:00:00.000Z',
+    });
+    expect(restored?.scheduledTime?.startsWith('14:30')).toBe(true);
+
+    const retry = await upload(OWNER_ID, restoreBatch, 9);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json()).toEqual({ applied: 2 });
+    const afterRetry = await loadTask(OWN_ID);
+    expect(afterRetry?.title).toBe('Original');
+    expect(afterRetry?.completedAt).toBe('2026-09-11T15:00:00.000Z');
+    expect(afterRetry?.createdAt).toBe('2026-09-10T12:00:00.000Z');
+  });
+
+  it('PUT restore accepts PowerSync space-separated created_at and completed_at', async () => {
+    await upload(OWNER_ID, [putOp(OWN_ID, { title: 'Original' })]);
+
+    const createdAt = '2026-09-10 12:00:00.000Z';
+    const completedAt = '2026-09-11 15:00:00.000000Z';
+    const response = await upload(OWNER_ID, [
+      { clientId: 2, op: 'DELETE', table: 'tasks', id: OWN_ID, opData: null },
+      putOp(
+        OWN_ID,
+        {
+          title: 'Original',
+          completed_at: completedAt,
+          created_at: createdAt,
+        },
+        3,
+      ),
+    ]);
+    expect(response.statusCode).toBe(200);
+
+    const row = await loadTask(OWN_ID);
+    if (!row) throw new Error('expected row');
+    expect(row.title).toBe('Original');
+    expect(new Date(row.createdAt).getTime()).toBe(new Date('2026-09-10T12:00:00.000Z').getTime());
+    if (row.completedAt == null) throw new Error('expected completed_at');
+    expect(new Date(row.completedAt).getTime()).toBe(
+      new Date('2026-09-11T15:00:00.000Z').getTime(),
+    );
+  });
+
+  it("PUT restore of another user's id returns 403 and leaves the row unchanged", async () => {
+    await upload(OTHER_ID, [putOp(OTHER_TASK_ID, { title: 'Other' })]);
+
+    const response = await upload(OWNER_ID, [
+      { clientId: 2, op: 'DELETE', table: 'tasks', id: OTHER_TASK_ID, opData: null },
+      putOp(OTHER_TASK_ID, { title: 'Stolen restore' }, 3),
+    ]);
+    expect(response.statusCode).toBe(403);
+    const row = await loadTask(OTHER_TASK_ID);
+    expect(row?.title).toBe('Other');
+    expect(row?.userId).toBe(OTHER_ID);
+  });
 });

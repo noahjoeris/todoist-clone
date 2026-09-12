@@ -33,7 +33,7 @@ describe('guest-task adoption', () => {
     sqlite.exec(`
       CREATE TABLE local_tasks (
         id TEXT PRIMARY KEY, title TEXT, description TEXT, priority INTEGER,
-        scheduled_date TEXT, scheduled_time TEXT, created_at TEXT
+        scheduled_date TEXT, scheduled_time TEXT, completed_at TEXT, created_at TEXT
       );
       CREATE TABLE ps_data_local__local_preferences (
         id TEXT NOT NULL PRIMARY KEY,
@@ -61,7 +61,7 @@ describe('guest-task adoption', () => {
       END;
       CREATE TABLE tasks (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, description TEXT, priority INTEGER,
-        scheduled_date TEXT, scheduled_time TEXT, created_at TEXT, updated_at TEXT
+        scheduled_date TEXT, scheduled_time TEXT, completed_at TEXT, created_at TEXT, updated_at TEXT
       );
     `);
 
@@ -145,6 +145,7 @@ describe('guest-task adoption', () => {
       priority: 1,
       scheduled_date: '2026-09-09',
       scheduled_time: '08:30',
+      completed_at: '2026-09-08T12:00:00.000Z',
       created_at: '2026-09-08T10:00:00.000Z',
     });
     insertLocalTask({
@@ -171,6 +172,7 @@ describe('guest-task adoption', () => {
         priority: 1,
         scheduled_date: '2026-09-09',
         scheduled_time: '08:30',
+        completed_at: '2026-09-08T12:00:00.000Z',
         created_at: '2026-09-08T10:00:00.000Z',
         updated_at: '2026-09-08T10:00:00.000Z',
       },
@@ -182,6 +184,7 @@ describe('guest-task adoption', () => {
         priority: 4,
         scheduled_date: null,
         scheduled_time: null,
+        completed_at: null,
         created_at: '2026-09-08T11:00:00.000Z',
         updated_at: '2026-09-08T11:00:00.000Z',
       },
@@ -193,8 +196,8 @@ describe('guest-task adoption', () => {
     sqlite
       .prepare(
         `INSERT INTO tasks
-          (id, user_id, title, description, priority, scheduled_date, scheduled_time, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, user_id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         TASK_A,
@@ -202,6 +205,7 @@ describe('guest-task adoption', () => {
         'Existing',
         '',
         4,
+        null,
         null,
         null,
         '2026-01-01T00:00:00.000Z',
@@ -275,13 +279,14 @@ describe('guest-task adoption', () => {
     priority?: number;
     scheduled_date?: string | null;
     scheduled_time?: string | null;
+    completed_at?: string | null;
     created_at?: string;
   }) {
     sqlite
       .prepare(
         `INSERT INTO local_tasks
-          (id, title, description, priority, scheduled_date, scheduled_time, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          (id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -290,6 +295,7 @@ describe('guest-task adoption', () => {
         row.priority ?? 4,
         row.scheduled_date ?? null,
         row.scheduled_time ?? null,
+        row.completed_at ?? null,
         row.created_at ?? '2026-09-08T10:00:00.000Z',
       );
   }

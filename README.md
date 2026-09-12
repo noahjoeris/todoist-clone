@@ -26,11 +26,18 @@ compose.local.yaml      Local overlays (ES256 JWT on auth, PowerSync) + API
 ## Setup
 
 The client currently supports local guest tasks (title, description, priority, date and optional
-time) with a live list, plus email/password accounts with email-link confirmation and persistent
-sessions. Guest tasks stay on the device and are hidden while signed in; after sign-in the app
-offers to add them to the account (or skip / don't ask again). Signed-in users sync
-account-owned tasks through PowerSync. Guest-only use needs no `.env`: run `pnpm install`,
+time) with a live list: complete and reopen from the checkbox, edit from the task, and delete
+with an 8-second Undo. Completed tasks sit in a collapsed section. Email/password accounts
+with email-link confirmation and persistent sessions are available when cloud env is set.
+Guest tasks stay on the device and are hidden while signed in; after sign-in the app
+offers to add them to the account (or skip / don't ask again), preserving completion.
+Signed-in users sync account-owned tasks through PowerSync, including completion and
+restores. Guest-only use needs no `.env`: run `pnpm install`,
 `pnpm build`, then `pnpm --filter @todoist-clone/client web` (or a native development build).
+
+This project is pre-release: schema changes replace the initial Drizzle migration in place.
+Reset local SQLite (reinstall / clear site data) and re-run `pnpm db:migrate` against a
+fresh or wiped Postgres when `public.tasks` changes; do not expect additive upgrades.
 
 ```sh
 pnpm install

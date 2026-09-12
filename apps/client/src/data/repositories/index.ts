@@ -28,7 +28,14 @@ export {
   type GuestTaskAdoptionState,
 } from './guest-task-adoption';
 export type { ClientSyncStatus, SyncStatusSource } from './sync';
-export { type Task, type TaskInput, type TaskPriority, taskInputSchema } from './task';
+export {
+  type Task,
+  type TaskInput,
+  TaskNotFoundError,
+  type TaskPriority,
+  TaskRestoreConflictError,
+  taskInputSchema,
+} from './task';
 export {
   createTaskRepositories,
   createTaskRepository,

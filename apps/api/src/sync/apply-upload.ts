@@ -65,6 +65,7 @@ async function applyPut(
       priority: opData.priority,
       scheduledDate: opData.scheduled_date ?? null,
       scheduledTime: opData.scheduled_time ?? null,
+      completedAt: opData.completed_at ?? null,
       createdAt: opData.created_at,
       updatedAt: sql`now()`,
     })
@@ -76,6 +77,7 @@ async function applyPut(
         priority: opData.priority,
         scheduledDate: opData.scheduled_date ?? null,
         scheduledTime: opData.scheduled_time ?? null,
+        completedAt: opData.completed_at ?? null,
         createdAt: opData.created_at,
         updatedAt: sql`now()`,
       },
@@ -198,6 +200,7 @@ function patchSet(opData: TaskPatchColumns) {
     priority?: number;
     scheduledDate?: string | null;
     scheduledTime?: string | null;
+    completedAt?: string | null;
     createdAt?: string;
     updatedAt: ReturnType<typeof sql>;
   } = { updatedAt: sql`now()` };
@@ -221,6 +224,10 @@ function patchSet(opData: TaskPatchColumns) {
   }
   if (opData.scheduled_time !== undefined) {
     set.scheduledTime = opData.scheduled_time;
+    hasColumn = true;
+  }
+  if (opData.completed_at !== undefined) {
+    set.completedAt = opData.completed_at;
     hasColumn = true;
   }
   if (opData.created_at !== undefined) {
