@@ -1,0 +1,76 @@
+# Main-only web preview. Not a required PR check; do not add pull_request triggers.
+name: Preview
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: preview-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_PAGES_PROJECT: todoist-clone
+  PREVIEW_URL: https://todoist-clone.pages.dev
+
+jobs:
+  deploy:
+    name: Deploy web preview
+    if: github.repository == 'noahjoeris/todoist-clone' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: preview
+      url: https://todoist-clone.pages.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Require public HTTPS client configuration
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          EXPO_PUBLIC_POWERSYNC_URL: ${{ secrets.EXPO_PUBLIC_POWERSYNC_URL }}
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+        run: node .github/scripts/validate-preview-env.mjs
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @todoist-clone/contracts build
+
+      - name: Export web client
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          EXPO_PUBLIC_POWERSYNC_URL: ${{ secrets.EXPO_PUBLIC_POWERSYNC_URL }}
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+        run: pnpm --filter @todoist-clone/client export:web
+
+      - name: Inspect export
+        run: node .github/scripts/inspect-preview-dist.mjs
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/client/dist --project-name=${{ env.CLOUDFLARE_PAGES_PROJECT }} --branch=main --commit-hash=${{ github.sha }} --commit-dirty=true
+
+      - name: Record deploy
+        run: |
+          {
+            echo "### Web preview"
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Stable URL: ${PREVIEW_URL}"
+            echo "- Deployment URL: ${{ steps.deploy.outputs.deployment-url }}"
+            echo "- Alias URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}"
+          } >> "${GITHUB_STEP_SUMMARY}"
