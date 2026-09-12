@@ -16,6 +16,8 @@ the same change that alters the architecture. Product/feature design does not be
                      Supabase Auth (JWT) ───────────────┘   Supabase Storage (files)
 ```
 
+- **Web preview**: a main-only Cloudflare Pages deployment of the Expo web export
+  (`apps/client/dist`) for interactive QA against shared staging services (ADR-020).
 - **Reads and writes** happen against the local SQLite database through the repository layer.
 - **Uploads**: the PowerSync SDK queues local writes; the backend connector posts them to the
   Fastify API, which validates (Zod), authorizes and applies them with Drizzle.
@@ -439,7 +441,39 @@ acquire labels.
   favorite 0/1 is normalized to boolean at the contract boundary, not by
   truthy coercion. `user_id` and `updated_at` stay server-owned (ADR-014).
 
+### ADR-020 Web preview is Cloudflare Pages via GitHub Actions Direct Upload
+
+Interactive QA of signed-in web flows needs a live HTTPS client against shared staging
+(Supabase Auth, Fastify, PowerSync). Unit tests and CI bundle exports cannot prove those
+browser journeys. Native QA continues to use development builds (ADR-007). There is no
+automated E2E suite (ADR-010); preview smoke is not a required merge gate.
+
+Consequences:
+
+- **Host.** Cloudflare Pages Free, Direct Upload (not Git integration). GitHub Actions
+  builds at the repository root with the same Node 24 / pinned pnpm setup as CI, then
+  Wrangler uploads `apps/client/dist` as the site root. Production branch is `main` only
+  (phase 1). One stable `*.pages.dev` URL. A custom domain is optional.
+- **Credentials.** The four `EXPO_PUBLIC_*` values live on the GitHub Actions environment
+  `preview` (restricted to `main`) and are injected only at export time. Missing or
+  non-public-HTTPS values fail the job before upload so guest-only mode cannot ship. They
+  are readable in the JavaScript bundle by design. `CLOUDFLARE_API_TOKEN` /
+  `CLOUDFLARE_ACCOUNT_ID` are passed only to the upload step. Server secrets, database
+  URLs, and account passwords never enter the client or the uploaded artifact. Ordinary PR
+  CI does not use this environment and has no `pull_request` deploy trigger.
+- **SPA and workers.** Pages' native SPA fallback applies when there is no top-level
+  `404.html`. PowerSync `public/@powersync` assets are copied into the export and must be
+  served as real files at domain root. Keep IndexedDB VFS; do not add COOP/COEP (ADR-007).
+- **Origins.** The deployed API `CORS_ORIGIN` and Supabase Site URL / Redirect URLs must
+  include the stable preview origin. The API CORS parser is exact strings or `*`, not a
+  subdomain wildcard. Changing Site URL affects every consumer of that Supabase project.
+- **Phase 2 (deferred).** Trusted PR previews are extra browser origins and need explicit
+  CORS/Auth entries. Do not expose deploy secrets to fork code.
+
+Runbook, secret names, and smoke checklist: README "Preview / QA".
+
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,
-different command), attachments/Storage, and social login.
+different command), attachments/Storage, social login, and web PR previews (ADR-020
+phase 2).

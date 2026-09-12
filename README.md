@@ -169,6 +169,9 @@ exports run when `apps/client` or `packages/contracts` change; the API image whe
 `apps/api` or `packages/{contracts,database}` change; compose validation when compose
 files or `infra/` change; API integration tests when the API, contracts, database or
 PowerSync config change. Pushes to `main` run every job. PRs do not export the Docker cache.
+Pushes to `main` also run `.github/workflows/preview.yml` (Cloudflare Pages Direct Upload
+of `apps/client/dist`). That workflow is not a required PR check, does not run on pull
+requests, and needs the `preview` environment secrets described below.
 
 ## Testing policy
 
@@ -185,3 +188,141 @@ pnpm db:migrate
 DATABASE_URL=postgresql://postgres:<password>@localhost:5432/postgres \
   pnpm --filter @todoist-clone/api test:integration
 ```
+
+## Preview / QA
+
+Phase 1 serves one stable public HTTPS URL of the Expo web client for interactive QA of
+sign-in, sync, guest-task adoption, and sign-out. It is **not** a merge gate. Native QA
+still uses development builds. PR previews are a later phase.
+
+### URL
+
+**https://todoist-clone.pages.dev** — Cloudflare Pages project `todoist-clone`, production
+branch `main`, app at the domain root. If Cloudflare assigns a different `*.pages.dev`
+hostname, update this section and the `CLOUDFLARE_PAGES_PROJECT` / `PREVIEW_URL` values in
+`.github/workflows/preview.yml`. A custom domain is optional and not required for v1.
+
+A failed deploy is visible in GitHub Actions (**Preview** workflow) and leaves the last
+successful production deployment in place.
+
+### Staging services
+
+Shared staging, not an isolated stack. **Do not guess URLs.** Record owners and actual
+values here when Noah confirms them. A client-only deploy is not enough for interactive
+acceptance: the Fastify API must be reachable over public HTTPS from a remote browser.
+
+| Service | Owner | Value | Notes |
+| --- | --- | --- | --- |
+| Cloudflare Pages `todoist-clone` | _TBD_ | https://todoist-clone.pages.dev | Direct Upload from Actions; Free plan; 25 MiB per-file limit |
+| Fastify API | _TBD_ | _public HTTPS URL TBD_ | Image: `docker build -f apps/api/Dockerfile .`. Document sleep/pause if any. |
+| Supabase (Auth + Postgres) | _TBD_ | _project URL TBD_ | Same project PowerSync uses for Auth |
+| PowerSync Cloud | _TBD_ | _instance URL TBD_ | Deploy `infra/powersync/sync-config.yaml` (`user_tasks`, `user_labels`, `user_task_labels`) |
+
+API runtime env (host only, never in the client bundle): `DATABASE_URL`, `SUPABASE_URL`,
+`SUPABASE_SECRET_KEY`, `CORS_ORIGIN`, plus the host `HOST`/`PORT`. Confirm HTTPS, `/health`,
+an authenticated `GET /me`, and a real `POST /sync/upload` — a healthy container is not
+enough. Writes stay authorized in Fastify.
+
+### GitHub secrets (`preview` environment)
+
+Create a GitHub Actions environment named **`preview`**, restricted to the `main` branch.
+Store these **environment** secrets (not repository secrets, so ordinary PR CI cannot see
+them):
+
+| Secret | Purpose |
+| --- | --- |
+| `EXPO_PUBLIC_SUPABASE_URL` | Staging Supabase HTTPS URL |
+| `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Publishable key for that same project |
+| `EXPO_PUBLIC_POWERSYNC_URL` | Staging PowerSync Cloud endpoint |
+| `EXPO_PUBLIC_API_URL` | Public HTTPS Fastify origin, never `localhost` |
+| `CLOUDFLARE_API_TOKEN` | Account → Cloudflare Pages → Edit, scoped to the chosen account |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id (not intrinsically secret; stored here anyway) |
+
+The four `EXPO_PUBLIC_*` values are injected only into the export step and are readable in
+the browser bundle by design. Changing them requires a rebuild/redeploy. Missing or
+non-public-HTTPS values fail the job **before** upload so guest-only mode cannot ship.
+
+The Cloudflare token is passed only to the upload step. Never put `SUPABASE_SECRET_KEY`,
+database URLs/passwords, account passwords, or host tokens in client variables, committed
+files, or the uploaded `dist`. No GitHub PAT is required.
+
+Cloudflare setup: create a **Direct Upload** Pages project named `todoist-clone` with
+production branch `main` (do not also connect Git integration — that would double-deploy).
+Create an API token with **Account → Cloudflare Pages → Edit**.
+
+### API CORS and Supabase Auth URLs
+
+On the deployed API, prefer exact origins (the parser is exact strings or the single value
+`*`; it does **not** treat `https://*.pages.dev` as a wildcard):
+
+```dotenv
+CORS_ORIGIN=https://todoist-clone.pages.dev,http://localhost:8081
+```
+
+Origins are scheme + hostname + optional port, no path or trailing slash. Restart/redeploy
+the API after changing this. Keep `http://localhost:8081` only if this API also serves
+local development. `CORS_ORIGIN=*` is acceptable only as a temporary shared-staging
+exception if Noah documents that choice; it is not the default. CORS is not write
+authorization.
+
+In the selected Supabase project's **Authentication → URL Configuration**:
+
+- **Site URL**: `https://todoist-clone.pages.dev/` (the single default redirect; replacing
+  it affects every consumer of this project, including local developers).
+- **Redirect URLs**: add that exact root; keep other deliberate destinations such as
+  `http://localhost:8081/` and `todoist-clone://auth/callback`.
+- Keep email/password and **Confirm email** enabled. Web `signUp` does not pass
+  `emailRedirectTo`, so confirmation returns to Site URL with a session fragment; the web
+  client persists it in `localStorage`.
+
+### Test accounts and data
+
+- Reusable **confirmed** accounts per tester (passwords live in a private store, not here).
+- One eligible mailbox for a single confirmation-link smoke. Supabase's default SMTP
+  delivers only to project-team addresses, about two messages per hour, with no SLA.
+  Custom SMTP is a dependency if testers need other addresses; do not disable confirmation.
+- Prefix disposable tasks with tester/run (e.g. `qa-18-<date>-…`). Avoid real personal data
+  and concurrent tests on one account where possible.
+- Cleanup owner: _TBD_. After smoke, delete prefixed tasks (and labels created for the run)
+  from the account, restore any browser network blocking, and do not leave blocked upload
+  endpoints.
+
+### Redeploy and restore
+
+- **Ship a new preview:** merge to `main` (or **Actions → Preview → Run workflow** on
+  `main`). The job summary records the commit and URL.
+- **Rerun a failed deploy:** the same workflow dispatch, after fixing secrets/config. The
+  previous successful Pages production deployment stays live until a new upload succeeds.
+- **Restore a known-good build:** in the Cloudflare dashboard, Pages → `todoist-clone` →
+  Deployments → roll back to the last good production deployment; or revert the bad commit
+  on `main` and push so Actions rebuilds that tree.
+
+### Smoke checklist
+
+Record PASS/FAIL per step with URL, deployed commit, browser, and date. Do not publish
+passwords or URL fragments/tokens. Interactive smoke is not required to merge product PRs.
+
+1. Clean browser profile: load the stable URL, request a nested path (e.g. `/inbox`) and
+   refresh. Confirm the app shell. In Network, `/@powersync/worker.js` and requested WASM
+   must be real assets (correct content type, not `index.html` behind a 200). Check Console.
+2. Create a disposable guest task, then sign in with a confirmed test account. Confirm
+   account tasks and the guest-adoption banner. Adopt once; it must not be offered again.
+   In a fresh guest-data setup, skip/dismiss and confirm unadopted guest tasks survive
+   sign-out.
+3. Create/update an account task and wait for **Synced**. Confirm `POST /sync/upload` and
+   PowerSync traffic. In a second clean profile, sign in to the same account and confirm
+   the change arrives (live `user_tasks` stream, not only local persistence). Reload to
+   confirm session restoration.
+4. Account screen: sign out with no pending uploads. Sign in again, block the API upload
+   endpoint, make a disposable account edit. Normal sign-out must stay disabled while
+   uploads are pending. Unblock, wait for the queue to drain, sign out. Repeat with
+   **Sign out and discard**; the discarded edit must never appear in the second profile.
+5. Once, with the agreed eligible mailbox and email budget: sign up, open the confirmation
+   link in the intended profile, and confirm it lands on the Site URL and establishes a
+   session. Reusable confirmed accounts do not replace this redirect check.
+6. Remove smoke data, restore network blocking, record results. If a step fails, check API
+   availability/CORS, Auth URL/email settings, and PowerSync assets/configuration
+   separately.
+
+Implementation of the workflow is complete when this runbook and `.github/workflows/preview.yml`
+land; interactive acceptance is separate and still needs the staging decisions above.
