@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../theme';
 import { ActionButton } from './ActionButton';
-import { calendarDays, toCalendarDate } from './task-date';
+import { addCalendarDays, calendarDays, toCalendarDate } from './task-date';
 
 interface TaskDatePickerProps {
   date: string | null;
   time: string;
+  today?: string;
   onDateChange: (date: string | null) => void;
   onTimeChange: (time: string) => void;
   onClose: () => void;
@@ -15,6 +16,7 @@ interface TaskDatePickerProps {
 export function TaskDatePicker({
   date,
   time,
+  today: todayProp,
   onDateChange,
   onTimeChange,
   onClose,
@@ -23,7 +25,7 @@ export function TaskDatePicker({
     const initial = date ? new Date(`${date}T12:00:00`) : new Date();
     return new Date(initial.getFullYear(), initial.getMonth(), 1);
   });
-  const today = toCalendarDate(new Date());
+  const today = todayProp ?? toCalendarDate(new Date());
 
   function chooseDate(value: string) {
     onDateChange(value);
@@ -36,14 +38,7 @@ export function TaskDatePicker({
       <Text style={styles.heading}>Date</Text>
       <View style={styles.row}>
         <ActionButton label="Today" onPress={() => chooseDate(today)} />
-        <ActionButton
-          label="Tomorrow"
-          onPress={() => {
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            chooseDate(toCalendarDate(tomorrow));
-          }}
-        />
+        <ActionButton label="Tomorrow" onPress={() => chooseDate(addCalendarDays(today, 1))} />
       </View>
       <View style={styles.monthRow}>
         <ActionButton

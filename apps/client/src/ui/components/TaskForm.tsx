@@ -1,15 +1,16 @@
-import { useRef, useState } from 'react';
-import { Alert, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   type TaskInput,
   TaskNotFoundError,
   type TaskPriority,
   taskInputSchema,
 } from '../../data/repositories';
+import { confirmDiscard } from '../discard-draft';
 import { colors, priorityColors } from '../theme';
 import { ActionButton } from './ActionButton';
 import { TaskDatePicker } from './TaskDatePicker';
-import { dateLabel } from './task-date';
+import { dateLabel, toCalendarDate } from './task-date';
 
 export interface TaskFormDraft {
   title: string;
@@ -37,6 +38,8 @@ interface TaskFormProps {
   onDelete?: () => Promise<void>;
   missing?: boolean;
   autoFocus?: boolean;
+  today?: string;
+  registerDirtyCheck?: (isDirty: () => boolean) => () => void;
 }
 
 export function TaskForm({
@@ -49,6 +52,8 @@ export function TaskForm({
   onDelete,
   missing = false,
   autoFocus = false,
+  today = toCalendarDate(new Date()),
+  registerDirtyCheck,
 }: TaskFormProps) {
   const [title, setTitle] = useState(initial.title);
   const [description, setDescription] = useState(initial.description);
@@ -62,6 +67,8 @@ export function TaskForm({
   const submitting = useRef(false);
   const busy = saving || deleting;
   const fieldsDisabled = busy || missing;
+
+  useEffect(() => registerDirtyCheck?.(() => isDirty()));
 
   function isDirty() {
     return (
@@ -177,7 +184,11 @@ export function TaskForm({
       <View style={styles.toolbar}>
         <View style={styles.options}>
           <ActionButton
-            label={date ? `${dateLabel(date)}${time ? ` · ${time}` : ''}` : 'Date'}
+            label={
+              date
+                ? `${dateLabel(date, new Date(`${today}T12:00:00`))}${time ? ` · ${time}` : ''}`
+                : 'Date'
+            }
             accessibilityLabel="Choose date and time"
             color={date ? colors.green : colors.muted}
             disabled={fieldsDisabled}
@@ -222,6 +233,7 @@ export function TaskForm({
         <TaskDatePicker
           date={date}
           time={time}
+          today={today}
           onDateChange={setDate}
           onTimeChange={setTime}
           onClose={() => setPanel(null)}
@@ -251,19 +263,6 @@ export function TaskForm({
       )}
     </View>
   );
-}
-
-function confirmDiscard(): Promise<boolean> {
-  if (Platform.OS === 'web') {
-    const confirm = (globalThis as { confirm?: (message?: string) => boolean }).confirm;
-    return Promise.resolve(confirm?.('Discard unsaved changes?') ?? true);
-  }
-  return new Promise((resolve) => {
-    Alert.alert('Discard changes?', 'Your edits will be lost.', [
-      { text: 'Keep editing', style: 'cancel', onPress: () => resolve(false) },
-      { text: 'Discard', style: 'destructive', onPress: () => resolve(true) },
-    ]);
-  });
 }
 
 const styles = StyleSheet.create({
