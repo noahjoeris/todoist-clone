@@ -38,16 +38,19 @@ completion and restores. Signed-in users can also create labels, attach them to 
 searchable picker (inline create uses charcoal and persists even if the task draft is cancelled),
 browse a label’s tasks, pin favorites in the sidebar, and manage rename/recolor/favorite/delete
 offline. Labels are account-only: guests see no label chips or navigation, and guest-task
-adoption does not copy labels. Guest-only use needs no `.env`: run `pnpm install`,
+adoption does not copy labels. Account-owned personal projects (nullable membership;
+Inbox is no project) sync through the same upload path; client navigation and
+editing are the companion enhancement
+([#29](https://github.com/noahjoeris/todoist-clone/issues/29)). Guest-only use needs no `.env`: run `pnpm install`,
 `pnpm build`, then `pnpm --filter @todoist-clone/client web` (or a native development build).
 View membership, ordering, and create defaults: [docs/task-views.md](docs/task-views.md).
 
 This project is pre-release: schema changes replace the initial Drizzle migration in place.
 Reset local SQLite (reinstall / clear site data) and re-run `pnpm db:migrate` against a
-fresh or wiped Postgres when `public.tasks`, `public.labels`, or `public.task_labels`
-change; do not expect additive upgrades. After stream or publication changes, redeploy
-`infra/powersync/sync-config.yaml` to PowerSync Cloud (or restart the local PowerSync
-service).
+fresh or wiped Postgres when `public.tasks`, `public.labels`, `public.task_labels`, or
+`public.projects` change; do not expect additive upgrades. After stream or publication
+changes, redeploy `infra/powersync/sync-config.yaml` to PowerSync Cloud (or restart the
+local PowerSync service).
 
 ```sh
 pnpm install
@@ -65,14 +68,14 @@ Fill both env files. Two ways to provide the backing services:
    `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `EXPO_PUBLIC_POWERSYNC_URL`, `EXPO_PUBLIC_API_URL`);
    see [Authentication setup](#authentication-setup).
 2. Prepare the database for PowerSync (replication role + empty `powersync` publication),
-   then apply Drizzle migrations (creates `public.tasks`, `public.labels`, and
-   `public.task_labels` and adds them to the publication):
+   then apply Drizzle migrations (creates `public.tasks`, `public.labels`,
+   `public.task_labels`, and `public.projects` and adds them to the publication):
    `psql "<direct connection string>" -v powersync_password='...' -f infra/powersync/bootstrap-source-db.sql`
    then `DATABASE_MIGRATION_URL="<direct connection string>" pnpm db:migrate`
 3. Create a PowerSync Cloud instance: connect it to the Supabase DB as `powersync_role`,
    enable **Use Supabase Auth**, and deploy the contents of `infra/powersync/sync-config.yaml`
-   (defines the `user_tasks`, `user_labels`, and `user_task_labels` streams). Redeploy
-   that file whenever streams change.
+   (defines the `user_tasks`, `user_labels`, `user_task_labels`, and `user_projects`
+   streams). Redeploy that file whenever streams change.
 4. Put the instance URL in `EXPO_PUBLIC_POWERSYNC_URL` and the Fastify origin in
    `EXPO_PUBLIC_API_URL`. For web, set the API `CORS_ORIGIN` to the Expo origin
    (e.g. `http://localhost:8081`).
@@ -84,7 +87,7 @@ cd infra/supabase && cp .env.example .env && sh utils/generate-keys.sh && sh uti
 git checkout -- infra/supabase/docker-compose.yml   # overlay sets GOTRUE_JWT_KEYS; do not keep vendored edits
 pnpm infra:up                     # Supabase + PowerSync + API, waits for health checks
 pnpm infra:powersync:bootstrap    # replication role + publication in the Supabase DB
-pnpm db:migrate                   # creates public.tasks/labels/task_labels and adds them to the publication
+pnpm db:migrate                   # creates public.tasks/labels/task_labels/projects and adds them to the publication
 ```
 
 Studio: http://localhost:8000 · API gateway: http://localhost:8000 · PowerSync: http://localhost:8080 · API: http://localhost:3000.
@@ -216,7 +219,7 @@ acceptance: the Fastify API must be reachable over public HTTPS from a remote br
 | Cloudflare Pages `todoist-clone` | _TBD_ | https://todoist-clone.pages.dev | Direct Upload from Actions; Free plan; 25 MiB per-file limit |
 | Fastify API | _TBD_ | _public HTTPS URL TBD_ | Image: `docker build -f apps/api/Dockerfile .`. Document sleep/pause if any. |
 | Supabase (Auth + Postgres) | _TBD_ | _project URL TBD_ | Same project PowerSync uses for Auth |
-| PowerSync Cloud | _TBD_ | _instance URL TBD_ | Deploy `infra/powersync/sync-config.yaml` (`user_tasks`, `user_labels`, `user_task_labels`) |
+| PowerSync Cloud | _TBD_ | _instance URL TBD_ | Deploy `infra/powersync/sync-config.yaml` (`user_tasks`, `user_labels`, `user_task_labels`, `user_projects`) |
 
 API runtime env (host only, never in the client bundle): `DATABASE_URL`, `SUPABASE_URL`,
 `SUPABASE_SECRET_KEY`, `CORS_ORIGIN`, plus the host `HOST`/`PORT`. Confirm HTTPS, `/health`,
