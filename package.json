@@ -2,6 +2,7 @@
   "name": "todoist-clone",
   "private": true,
   "version": "0.0.0",
+  "license": "MIT",
   "packageManager": "pnpm@12.3.4",
   "engines": {
     "node": ">=24"
