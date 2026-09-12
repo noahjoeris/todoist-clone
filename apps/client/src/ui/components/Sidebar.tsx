@@ -1,3 +1,4 @@
+import type { RefObject } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { LabelListItem, ProjectListItem, TaskActiveCounts } from '../../data/repositories';
 import { activeProjects, favoriteProjects } from '../../data/repositories';
@@ -15,6 +16,8 @@ interface SidebarProps {
   syncLabel?: string | undefined;
   onSelect: (pane: HomePane) => void;
   onAddTask: () => void;
+  onSearch: () => void;
+  searchButtonRef?: RefObject<View | null>;
   favoriteLabels?: LabelListItem[];
   projects?: ProjectListItem[];
   onCreateProject?: () => void;
@@ -27,6 +30,8 @@ export function Sidebar({
   syncLabel,
   onSelect,
   onAddTask,
+  onSearch,
+  searchButtonRef,
   favoriteLabels,
   projects,
   onCreateProject,
@@ -47,6 +52,12 @@ export function Sidebar({
       )}
       <View style={styles.add}>
         <ActionButton label="+ Add task" color={colors.accent} onPress={onAddTask} />
+        <ActionButton
+          ref={searchButtonRef}
+          label="Search"
+          accessibilityLabel="Search tasks"
+          onPress={onSearch}
+        />
       </View>
       <ScrollView
         accessibilityRole="list"
@@ -219,7 +230,7 @@ const styles = StyleSheet.create({
   accountLabel: { color: colors.text, fontSize: 15, fontWeight: '600' },
   unavailable: { color: colors.error, fontSize: 13, lineHeight: 18 },
   sync: { color: colors.muted, fontSize: 13, paddingHorizontal: 8 },
-  add: { alignSelf: 'flex-start' },
+  add: { alignSelf: 'flex-start', gap: 8 },
   navScroll: { flex: 1 },
   nav: { gap: 4 },
   favorites: { gap: 4, marginTop: 20 },

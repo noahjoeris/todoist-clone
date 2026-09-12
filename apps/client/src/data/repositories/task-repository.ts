@@ -12,11 +12,27 @@ import {
   taskInputSchema,
 } from './task';
 import {
+  compileAccountSearchSql,
+  compileGuestSearchSql,
+  parseSearchQuery,
+  SEARCH_PAGE_SIZE,
+} from './task-search';
+import {
   type TaskActiveCounts,
   type TaskViewQuery,
   viewOrderSql,
   viewPredicate,
 } from './task-view';
+
+export type TaskSearchQuery = {
+  query: string;
+  limit?: number;
+};
+
+export type TaskSearchSnapshot = {
+  tasks: Task[];
+  hasMore: boolean;
+};
 
 export interface TaskRepository {
   create(input: TaskInput, labelIds?: readonly string[], projectId?: string | null): Promise<void>;
@@ -36,6 +52,15 @@ export interface TaskRepository {
   subscribeById(
     id: string,
     onTask: (task: Task | null) => void,
+    onError: (error: Error) => void,
+  ): () => void;
+  /**
+   * Live keyword search over active tasks in this identity scope. Blank queries
+   * resolve to an empty snapshot without watching an unfiltered list.
+   */
+  subscribeSearch(
+    query: TaskSearchQuery,
+    onResults: (snapshot: TaskSearchSnapshot) => void,
     onError: (error: Error) => void,
   ): () => void;
   subscribeView(
@@ -389,6 +414,55 @@ function createTableTaskRepository(
         [id, target.userId],
         (rows) => {
           onTask(collectAccountTasks(rows)[0] ?? null);
+        },
+        onError,
+        ACCOUNT_WATCH_TABLES,
+      );
+    },
+
+    subscribeSearch(query, onResults, onError) {
+      const parsed = parseSearchQuery(query.query);
+      if (parsed.status === 'blank') {
+        onResults({ tasks: [], hasMore: false });
+        return () => {};
+      }
+      if (parsed.status === 'invalid') {
+        onError(new Error('Search query is too long.'));
+        return () => {};
+      }
+      const limit = query.limit ?? SEARCH_PAGE_SIZE;
+      if (!Number.isInteger(limit) || limit < 1) {
+        onError(new Error('Search limit must be a positive integer.'));
+        return () => {};
+      }
+      if (target.table === 'local_tasks') {
+        const compiled = compileGuestSearchSql(parsed, limit);
+        return watchQuery<TaskRow>(
+          database,
+          compiled.sql,
+          compiled.parameters,
+          (rows) => {
+            const tasks = rows.map(mapGuestTaskRow);
+            onResults({
+              tasks: tasks.slice(0, limit),
+              hasMore: tasks.length > limit,
+            });
+          },
+          onError,
+          ['local_tasks'],
+        );
+      }
+      const compiled = compileAccountSearchSql(parsed, target.userId, limit);
+      return watchQuery<TaskRow>(
+        database,
+        compiled.sql,
+        compiled.parameters,
+        (rows) => {
+          const tasks = collectAccountTasks(rows);
+          onResults({
+            tasks: tasks.slice(0, limit),
+            hasMore: tasks.length > limit,
+          });
         },
         onError,
         ACCOUNT_WATCH_TABLES,

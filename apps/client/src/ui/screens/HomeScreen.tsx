@@ -23,6 +23,7 @@ import {
   type LabelRepository,
   type ProjectListItem,
   type ProjectRepository,
+  type RecentSearchRepository,
   type SyncStatusSource,
   type Task,
   type TaskActiveCounts,
@@ -34,6 +35,7 @@ import {
 import type { AccountEntry } from '../account-entry';
 import { ActionButton } from '../components/ActionButton';
 import { AppShell } from '../components/AppShell';
+import { SearchModal } from '../components/SearchModal';
 import { Sidebar } from '../components/Sidebar';
 import { TaskComposer } from '../components/TaskComposer';
 import { TaskEditor } from '../components/TaskEditor';
@@ -59,8 +61,10 @@ import {
   viewedProjectIsMissing,
 } from '../home-pane';
 import { useCalendarToday } from '../hooks/useCalendarToday';
+import { useSearchSession } from '../hooks/useSearchSession';
 import { useSyncStatus } from '../hooks/useSyncStatus';
 import { confirmLeaveDeletedProject } from '../leave-deleted-project';
+import { shouldIgnoreSearchShortcut } from '../search-shortcut';
 import {
   defaultComposerLabelIds,
   defaultComposerProjectId,
@@ -82,6 +86,7 @@ type Composer =
 
 interface HomeScreenProps {
   repository: TaskRepository;
+  recents: RecentSearchRepository;
   account: AccountEntry;
   pane: HomePane;
   onPaneChange: (pane: HomePane) => void;
@@ -127,6 +132,7 @@ const EMPTY_COPY: Record<
 
 export function HomeScreen({
   repository,
+  recents,
   account,
   pane,
   onPaneChange,
@@ -143,7 +149,12 @@ export function HomeScreen({
   const [presence, setPresence] = useState(closedDrawer);
   const layoutModeRef = useRef(layoutMode);
   const menuButtonRef = useRef<View>(null);
+  const searchButtonRef = useRef<View>(null);
   const dirtyCheckRef = useRef<() => boolean>(() => false);
+  const openSearchAfterDrawerRef = useRef(false);
+  const searchRestoreRef = useRef<() => void>(() => {});
+  const skipSearchRestoreRef = useRef(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const [active, setActive] = useState<Task[]>([]);
   const [completed, setCompleted] = useState<Task[]>([]);
@@ -177,6 +188,7 @@ export function HomeScreen({
   );
   const undoState = useSyncExternalStore(undo.subscribe, undo.getState, undo.getState);
   const upcoming = useMemo(() => upcomingBounds(today, upcomingDays), [today, upcomingDays]);
+  const searchSession = useSearchSession(repository, recents, searchOpen);
 
   const destination = taskDestinationOf(pane);
   const viewingLabel = pane.type === 'label' ? pane.labelId : null;
@@ -335,6 +347,24 @@ export function HomeScreen({
 
   const onCloseFinished = useCallback((generation: number) => {
     setPresence((state) => finishDrawerClose(state, generation));
+    if (openSearchAfterDrawerRef.current) {
+      openSearchAfterDrawerRef.current = false;
+      setSearchOpen(true);
+    }
+  }, []);
+
+  const restoreDrawerFocus = useCallback(() => {
+    if (openSearchAfterDrawerRef.current || searchOpen) return;
+    const node = menuButtonRef.current as (View & { focus?: () => void }) | null;
+    node?.focus?.();
+  }, [searchOpen]);
+
+  const restoreSearchFocus = useCallback(() => {
+    if (skipSearchRestoreRef.current) {
+      skipSearchRestoreRef.current = false;
+      return;
+    }
+    searchRestoreRef.current();
   }, []);
 
   const closeForms = useCallback(() => {
@@ -391,6 +421,60 @@ export function HomeScreen({
     heldEditingTaskRef.current = task;
     setEditingId(task.id);
     setEditingBaseline(task.labels.map((label) => label.id));
+  }
+
+  function captureSearchRestore(source: 'sidebar' | 'drawer' | 'shortcut') {
+    if (source === 'drawer') {
+      searchRestoreRef.current = () => {
+        const node = menuButtonRef.current as (View & { focus?: () => void }) | null;
+        node?.focus?.();
+      };
+      return;
+    }
+    if (source === 'sidebar') {
+      searchRestoreRef.current = () => {
+        const node = searchButtonRef.current as (View & { focus?: () => void }) | null;
+        node?.focus?.();
+      };
+      return;
+    }
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const active = document.activeElement as { focus?: () => void } | null;
+      searchRestoreRef.current = () => active?.focus?.();
+      return;
+    }
+    searchRestoreRef.current = () => {
+      const node = searchButtonRef.current as (View & { focus?: () => void }) | null;
+      node?.focus?.();
+    };
+  }
+
+  async function openSearch(source: 'sidebar' | 'shortcut') {
+    if (searchOpen) return;
+    if (!(await confirmLeave())) return;
+    const fromDrawer = layoutMode === 'overlay' && presence.visible;
+    captureSearchRestore(fromDrawer ? 'drawer' : source === 'shortcut' ? 'shortcut' : 'sidebar');
+    if (fromDrawer) {
+      openSearchAfterDrawerRef.current = true;
+      setPresence(requestDrawerClose);
+      return;
+    }
+    setSearchOpen(true);
+  }
+
+  function closeSearch() {
+    setSearchOpen(false);
+  }
+
+  function openSearchResult(task: Task) {
+    skipSearchRestoreRef.current = true;
+    if (pane.type === 'labels' || pane.type === 'projects') {
+      onPaneChange({ type: 'inbox' });
+    }
+    heldEditingTaskRef.current = task;
+    setEditingId(task.id);
+    setEditingBaseline(task.labels.map((label) => label.id));
+    setSearchOpen(false);
   }
 
   async function saveEdit(input: TaskInput, labelIds?: string[], projectId?: string | null) {
@@ -459,6 +543,25 @@ export function HomeScreen({
     setComposer({ kind: 'group', date });
   }
 
+  const searchOpenRef = useRef(searchOpen);
+  searchOpenRef.current = searchOpen;
+  const drawerVisibleRef = useRef(presence.visible);
+  drawerVisibleRef.current = presence.visible;
+  const openSearchRef = useRef(openSearch);
+  openSearchRef.current = openSearch;
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (searchOpenRef.current || drawerVisibleRef.current) return;
+      if (shouldIgnoreSearchShortcut(event)) return;
+      event.preventDefault();
+      void openSearchRef.current('shortcut');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const wrappedAccount = wrapAccount(account, confirmLeave);
   const viewEditingTask =
     editingId == null
@@ -475,6 +578,7 @@ export function HomeScreen({
   heldEditingTaskRef.current = resolvedEditor.hold;
   const editingTask = resolvedEditor.task;
   const editorMissing = resolvedEditor.missing;
+  const editorReady = editingId != null && (editingTask != null || editorMissing);
   const composerDate = defaultComposerDate(composer, pane, today);
   const sections = buildSections(pane, active, today, addFromGroup);
   const emptyCopy =
@@ -501,6 +605,8 @@ export function HomeScreen({
       syncLabel={syncIndicator ? SYNC_LABEL[syncIndicator] : undefined}
       onSelect={(next) => void selectPane(next)}
       onAddTask={() => void addFromSidebar()}
+      onSearch={() => void openSearch('sidebar')}
+      searchButtonRef={searchButtonRef}
       {...(labels ? { favoriteLabels } : {})}
       {...(projects
         ? { projects: projectItems, onCreateProject: () => void addProjectFromSidebar() }
@@ -518,6 +624,7 @@ export function HomeScreen({
         onCloseDrawer={onCloseDrawer}
         onCloseFinished={onCloseFinished}
         menuButtonRef={menuButtonRef}
+        restoreFocus={restoreDrawerFocus}
       >
         <KeyboardAvoidingView
           style={styles.screen}
@@ -646,7 +753,9 @@ export function HomeScreen({
                       onUndo={() => void undoDelete()}
                     />
                   )}
-                  {editingId ? (
+                  {editingId && !editorReady ? (
+                    <ActivityIndicator color={colors.muted} />
+                  ) : editingId ? (
                     <TaskEditor
                       key={editingId}
                       task={editingTask}
@@ -711,6 +820,14 @@ export function HomeScreen({
           )}
         </KeyboardAvoidingView>
       </AppShell>
+      {searchOpen && (
+        <SearchModal
+          session={searchSession}
+          onClose={closeSearch}
+          onOpenTask={openSearchResult}
+          restoreFocus={restoreSearchFocus}
+        />
+      )}
     </SafeAreaView>
   );
 }
