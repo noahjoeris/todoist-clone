@@ -1,6 +1,6 @@
 import type { CrudEntry } from '@todoist-clone/contracts';
-import { and, eq, schema, sql } from '@todoist-clone/database';
-import { ForbiddenError, isUniqueViolation, TASK_LABELS_PAIR_UNIQUE } from './errors.js';
+import { and, eq, schema } from '@todoist-clone/database';
+import { ForbiddenError } from './errors.js';
 import type { UploadExecutor } from './types.js';
 
 const { labels, taskLabels, tasks } = schema;
@@ -60,40 +60,46 @@ async function applyPut(
     throw new ForbiddenError();
   }
 
-  await tx.execute(sql`SAVEPOINT task_label_put`);
-  try {
-    const written = await tx
-      .insert(taskLabels)
-      .values({
-        id: operation.id,
-        userId,
+  // Pre-check the pair unique key: a 23505 inside postgres.js begin() is
+  // unrecoverable, and a duplicate pair must keep the existing link id.
+  const [existingPair] = await tx
+    .select({ id: taskLabels.id })
+    .from(taskLabels)
+    .where(
+      and(
+        eq(taskLabels.taskId, taskId),
+        eq(taskLabels.labelId, labelId),
+        eq(taskLabels.userId, userId),
+      ),
+    )
+    .limit(1)
+    .for('update');
+  if (existingPair && existingPair.id !== operation.id) {
+    return;
+  }
+
+  const written = await tx
+    .insert(taskLabels)
+    .values({
+      id: operation.id,
+      userId,
+      taskId,
+      labelId,
+      createdAt,
+    })
+    .onConflictDoUpdate({
+      target: taskLabels.id,
+      set: {
         taskId,
         labelId,
         createdAt,
-      })
-      .onConflictDoUpdate({
-        target: taskLabels.id,
-        set: {
-          taskId,
-          labelId,
-          createdAt,
-        },
-        setWhere: eq(taskLabels.userId, userId),
-      })
-      .returning({ id: taskLabels.id });
+      },
+      setWhere: eq(taskLabels.userId, userId),
+    })
+    .returning({ id: taskLabels.id });
 
-    await tx.execute(sql`RELEASE SAVEPOINT task_label_put`);
-
-    if (written.length === 0) {
-      throw new ForbiddenError();
-    }
-  } catch (error) {
-    if (error instanceof ForbiddenError) throw error;
-    if (isUniqueViolation(error, TASK_LABELS_PAIR_UNIQUE)) {
-      await tx.execute(sql`ROLLBACK TO SAVEPOINT task_label_put`);
-      return;
-    }
-    throw error;
+  if (written.length === 0) {
+    throw new ForbiddenError();
   }
 }
 

@@ -36,24 +36,28 @@ describe('applyUpload task_labels', () => {
   it('locks the referenced task and label with FOR UPDATE before inserting', async () => {
     const task = selectChain([{ userId: USER_ID }]);
     const label = selectChain([{ userId: USER_ID }]);
-    const existing = selectChain([]);
+    const existingById = selectChain([]);
+    const existingPair = selectChain([]);
     let selects = 0;
-    const execute = vi.fn().mockResolvedValue(undefined);
+    const insert = vi.fn(() => ({
+      values: () => ({
+        onConflictDoUpdate: () => ({
+          returning: () => Promise.resolve([{ id: LINK_ID }]),
+        }),
+      }),
+    }));
     const tx = {
       select: () => {
         selects += 1;
         if (selects === 1) return task.chain;
         if (selects === 2) return label.chain;
-        return existing.chain;
+        if (selects === 3) return existingById.chain;
+        return existingPair.chain;
       },
-      execute,
-      insert: () => ({
-        values: () => ({
-          onConflictDoUpdate: () => ({
-            returning: () => Promise.resolve([{ id: LINK_ID }]),
-          }),
-        }),
-      }),
+      execute: () => {
+        throw new Error('execute should not run');
+      },
+      insert,
       update: () => {
         throw new Error('update should not run');
       },
@@ -66,7 +70,42 @@ describe('applyUpload task_labels', () => {
 
     expect(task.forFn).toHaveBeenCalledWith('update');
     expect(label.forFn).toHaveBeenCalledWith('update');
-    expect(execute).toHaveBeenCalled();
+    expect(existingById.forFn).toHaveBeenCalledWith('update');
+    expect(existingPair.forFn).toHaveBeenCalledWith('update');
+    expect(insert).toHaveBeenCalled();
+  });
+
+  it('no-ops when the task+label pair already exists under a different id', async () => {
+    const task = selectChain([{ userId: USER_ID }]);
+    const label = selectChain([{ userId: USER_ID }]);
+    const existingById = selectChain([]);
+    const existingPair = selectChain([{ id: '99999999-9999-4999-8999-999999999999' }]);
+    let selects = 0;
+    const tx = {
+      select: () => {
+        selects += 1;
+        if (selects === 1) return task.chain;
+        if (selects === 2) return label.chain;
+        if (selects === 3) return existingById.chain;
+        return existingPair.chain;
+      },
+      execute: () => {
+        throw new Error('execute should not run');
+      },
+      insert: () => {
+        throw new Error('insert should not run');
+      },
+      update: () => {
+        throw new Error('update should not run');
+      },
+      delete: () => {
+        throw new Error('delete should not run');
+      },
+    };
+
+    await applyUpload(tx as never, USER_ID, [putLink()]);
+
+    expect(existingPair.forFn).toHaveBeenCalledWith('update');
   });
 
   it('rejects a link to a missing or foreign task before insert', async () => {
