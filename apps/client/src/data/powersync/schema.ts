@@ -38,10 +38,31 @@ const tasks = new Table({
   updated_at: column.text,
 });
 
+// Account-owned labels. Mirrors public.labels and the user_labels Sync Stream.
+// SQLite stores boolean `is_favorite` as integer (PowerSync convention).
+const labels = new Table({
+  user_id: column.text,
+  name: column.text,
+  color: column.text,
+  is_favorite: column.integer,
+  created_at: column.text,
+  updated_at: column.text,
+});
+
+// Account-owned task↔label links. Mirrors public.task_labels / user_task_labels.
+const taskLabels = new Table({
+  user_id: column.text,
+  task_id: column.text,
+  label_id: column.text,
+  created_at: column.text,
+});
+
 export const appSchema = new Schema({
   local_tasks: localTasks,
   local_preferences: localPreferences,
   tasks,
+  labels,
+  task_labels: taskLabels,
 });
 
 export type AppDatabaseTypes = (typeof appSchema)['types'];

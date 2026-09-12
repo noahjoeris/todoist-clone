@@ -7,4 +7,6 @@
  * - Tables must be added to the `powersync` publication explicitly (see infra/powersync).
  */
 
+export * from './labels.js';
+export * from './task-labels.js';
 export * from './tasks.js';

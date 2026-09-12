@@ -29,5 +29,21 @@ describe('appSchema', () => {
       'created_at',
       'updated_at',
     ]);
+    expect(appSchema.props.labels.localOnly).toBe(false);
+    expect(appSchema.props.labels.columns.map((column) => column.name)).toEqual([
+      'user_id',
+      'name',
+      'color',
+      'is_favorite',
+      'created_at',
+      'updated_at',
+    ]);
+    expect(appSchema.props.task_labels.localOnly).toBe(false);
+    expect(appSchema.props.task_labels.columns.map((column) => column.name)).toEqual([
+      'user_id',
+      'task_id',
+      'label_id',
+      'created_at',
+    ]);
   });
 });
