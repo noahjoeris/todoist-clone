@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import {
+  type LabelListItem,
+  type LabelRepository,
+  sameIdSet,
   type TaskInput,
   TaskNotFoundError,
   type TaskPriority,
@@ -9,6 +12,8 @@ import {
 import { confirmDiscard } from '../discard-draft';
 import { colors, priorityColors } from '../theme';
 import { ActionButton } from './ActionButton';
+import { LabelChipRow } from './LabelChip';
+import { LabelPicker } from './LabelPicker';
 import { TaskDatePicker } from './TaskDatePicker';
 import { dateLabel, toCalendarDate } from './task-date';
 
@@ -30,7 +35,7 @@ export const emptyTaskDraft: TaskFormDraft = {
 
 interface TaskFormProps {
   initial: TaskFormDraft;
-  onSubmit: (input: TaskInput) => Promise<void>;
+  onSubmit: (input: TaskInput, labelIds?: string[]) => Promise<void>;
   onClose: () => void;
   submitLabel: string;
   submitAccessibilityLabel: string;
@@ -40,6 +45,10 @@ interface TaskFormProps {
   autoFocus?: boolean;
   today?: string;
   registerDirtyCheck?: (isDirty: () => boolean) => () => void;
+  labels?: LabelRepository;
+  initialLabelIds?: string[];
+  /** Composer always sends the selection; the editor omits it when unchanged. */
+  submitLabels?: 'always' | 'when-changed';
 }
 
 export function TaskForm({
@@ -54,19 +63,47 @@ export function TaskForm({
   autoFocus = false,
   today = toCalendarDate(new Date()),
   registerDirtyCheck,
+  labels: labelsRepository,
+  initialLabelIds = [],
+  submitLabels = 'when-changed',
 }: TaskFormProps) {
   const [title, setTitle] = useState(initial.title);
   const [description, setDescription] = useState(initial.description);
   const [priority, setPriority] = useState<TaskPriority>(initial.priority);
   const [date, setDate] = useState<string | null>(initial.date);
   const [time, setTime] = useState(initial.time);
-  const [panel, setPanel] = useState<'date' | 'priority' | null>(null);
+  const [panel, setPanel] = useState<'date' | 'priority' | 'labels' | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [labelCatalog, setLabelCatalog] = useState<LabelListItem[]>([]);
+  const [labelsReady, setLabelsReady] = useState(false);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>(initialLabelIds);
   const submitting = useRef(false);
   const busy = saving || deleting;
   const fieldsDisabled = busy || missing;
+  const showLabels = labelsRepository != null;
+
+  useEffect(() => {
+    if (!labelsRepository) return;
+    setLabelsReady(false);
+    return labelsRepository.subscribe(
+      (items) => {
+        setLabelCatalog(items);
+        setLabelsReady(true);
+      },
+      () => {},
+    );
+  }, [labelsRepository]);
+
+  useEffect(() => {
+    if (!showLabels || !labelsReady) return;
+    const available = new Set(labelCatalog.map((label) => label.id));
+    setSelectedLabelIds((current) => {
+      const next = current.filter((id) => available.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [labelCatalog, labelsReady, showLabels]);
 
   useEffect(() => registerDirtyCheck?.(() => isDirty()));
 
@@ -76,7 +113,8 @@ export function TaskForm({
       description !== initial.description ||
       priority !== initial.priority ||
       date !== initial.date ||
-      time !== initial.time
+      time !== initial.time ||
+      (showLabels && !sameIdSet(selectedLabelIds, initialLabelIds))
     );
   }
 
@@ -102,7 +140,13 @@ export function TaskForm({
     setError(null);
     setPanel(null);
     try {
-      await onSubmit(result.data);
+      const labelsChanged = showLabels && !sameIdSet(selectedLabelIds, initialLabelIds);
+      const labelIds = !showLabels
+        ? undefined
+        : submitLabels === 'always' || labelsChanged
+          ? selectedLabelIds
+          : undefined;
+      await onSubmit(result.data, labelIds);
       onClose();
     } catch (cause) {
       setError(
@@ -203,6 +247,20 @@ export function TaskForm({
             selected={panel === 'priority'}
             onPress={() => setPanel(panel === 'priority' ? null : 'priority')}
           />
+          {showLabels && (
+            <ActionButton
+              label={
+                selectedLabelIds.length === 0
+                  ? 'Labels'
+                  : `${selectedLabelIds.length} ${selectedLabelIds.length === 1 ? 'label' : 'labels'}`
+              }
+              accessibilityLabel="Choose labels"
+              color={selectedLabelIds.length > 0 ? colors.accent : colors.muted}
+              disabled={fieldsDisabled}
+              selected={panel === 'labels'}
+              onPress={() => setPanel(panel === 'labels' ? null : 'labels')}
+            />
+          )}
         </View>
         <View style={styles.actions}>
           {onDelete && (
@@ -255,6 +313,20 @@ export function TaskForm({
             />
           ))}
         </View>
+      )}
+      {panel === 'labels' && showLabels && labelsRepository && !fieldsDisabled && (
+        <LabelPicker
+          labels={labelCatalog}
+          selectedIds={selectedLabelIds}
+          onChange={setSelectedLabelIds}
+          onCreate={(name) => labelsRepository.create({ name })}
+          disabled={fieldsDisabled}
+        />
+      )}
+      {showLabels && selectedLabelIds.length > 0 && panel !== 'labels' && (
+        <LabelChipRow
+          labels={labelCatalog.filter((label) => selectedLabelIds.includes(label.id))}
+        />
       )}
       {error && (
         <Text accessibilityRole="alert" style={styles.error}>

@@ -47,3 +47,19 @@ live active counts; Upcoming does not, because its range is expandable.
 The selected destination is kept while opening account settings and returning in the
 same session, and resets to Inbox when the guest/account identity changes. Unsaved
 composer or editor drafts use the existing discard confirmation.
+
+## Labels
+
+Account-only. Guests do not see label chips, the picker, Labels navigation, or
+favorites.
+
+Opening a label shows its active tasks with Inbox ordering and a collapsed
+Completed section (membership is the association, including completed tasks
+dated for that view’s rules). New tasks added from that view default to the
+selected label. Sidebar **Add task** stays unscheduled and does not copy the
+label. Deleting the label currently in view returns to Inbox.
+
+The Labels management screen lists every label alphabetically with active-task
+counts. Favorite labels appear in the sidebar, also alphabetically. Rename,
+recolor, favorite, and count changes update live through the repository
+subscriptions.

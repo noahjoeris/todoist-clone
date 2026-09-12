@@ -1,27 +1,32 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { TaskActiveCounts, TaskDestination } from '../../data/repositories';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { LabelListItem, TaskActiveCounts } from '../../data/repositories';
 import type { AccountEntry } from '../account-entry';
 import { SIDEBAR_WIDTH } from '../drawer-presence';
-import { colors } from '../theme';
+import type { HomePane } from '../home-pane';
+import { isSamePane } from '../home-pane';
+import { colors, hexForLabelColor } from '../theme';
 import { ActionButton } from './ActionButton';
 
 interface SidebarProps {
   account: AccountEntry;
-  destination: TaskDestination;
+  pane: HomePane;
   counts: TaskActiveCounts;
   syncLabel?: string | undefined;
-  onSelect: (destination: TaskDestination) => void;
+  onSelect: (pane: HomePane) => void;
   onAddTask: () => void;
+  favoriteLabels?: LabelListItem[];
 }
 
 export function Sidebar({
   account,
-  destination,
+  pane,
   counts,
   syncLabel,
   onSelect,
   onAddTask,
+  favoriteLabels,
 }: SidebarProps) {
+  const showLabels = favoriteLabels != null;
   return (
     <View style={styles.sidebar} accessibilityRole="menu">
       <AccountEntryView account={account} />
@@ -33,25 +38,53 @@ export function Sidebar({
       <View style={styles.add}>
         <ActionButton label="+ Add task" color={colors.accent} onPress={onAddTask} />
       </View>
-      <View accessibilityRole="list" style={styles.nav}>
-        <NavItem
-          label="Inbox"
-          count={counts.inbox}
-          selected={destination === 'inbox'}
-          onPress={() => onSelect('inbox')}
-        />
-        <NavItem
-          label="Today"
-          count={counts.today}
-          selected={destination === 'today'}
-          onPress={() => onSelect('today')}
-        />
-        <NavItem
-          label="Upcoming"
-          selected={destination === 'upcoming'}
-          onPress={() => onSelect('upcoming')}
-        />
-      </View>
+      <ScrollView
+        accessibilityRole="list"
+        style={styles.navScroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.nav}>
+          <NavItem
+            label="Inbox"
+            count={counts.inbox}
+            selected={pane.type === 'inbox'}
+            onPress={() => onSelect({ type: 'inbox' })}
+          />
+          <NavItem
+            label="Today"
+            count={counts.today}
+            selected={pane.type === 'today'}
+            onPress={() => onSelect({ type: 'today' })}
+          />
+          <NavItem
+            label="Upcoming"
+            selected={pane.type === 'upcoming'}
+            onPress={() => onSelect({ type: 'upcoming' })}
+          />
+          {showLabels && (
+            <NavItem
+              label="Labels"
+              selected={pane.type === 'labels'}
+              onPress={() => onSelect({ type: 'labels' })}
+            />
+          )}
+        </View>
+        {showLabels && favoriteLabels.length > 0 && (
+          <View style={styles.favorites}>
+            <Text style={styles.favoritesTitle}>Favorites</Text>
+            {favoriteLabels.map((label) => (
+              <NavItem
+                key={label.id}
+                label={label.name}
+                count={label.activeTaskCount}
+                selected={isSamePane(pane, { type: 'label', labelId: label.id })}
+                color={hexForLabelColor(label.color)}
+                onPress={() => onSelect({ type: 'label', labelId: label.id })}
+              />
+            ))}
+          </View>
+        )}
+      </ScrollView>
     </View>
   );
 }
@@ -84,11 +117,13 @@ function NavItem({
   count,
   selected,
   onPress,
+  color,
 }: {
   label: string;
   count?: number;
   selected: boolean;
   onPress: () => void;
+  color?: string;
 }) {
   const accessibilityLabel =
     count == null ? label : `${label}, ${count} ${count === 1 ? 'task' : 'tasks'}`;
@@ -100,7 +135,10 @@ function NavItem({
       onPress={onPress}
       style={({ pressed }) => [styles.navItem, (pressed || selected) && styles.active]}
     >
-      <Text style={[styles.navLabel, selected && styles.navLabelSelected]}>{label}</Text>
+      <View style={styles.navLabelRow}>
+        {color && <View style={[styles.dot, { backgroundColor: color }]} />}
+        <Text style={[styles.navLabel, selected && styles.navLabelSelected]}>{label}</Text>
+      </View>
       {count != null && <Text style={styles.navCount}>{count}</Text>}
     </Pressable>
   );
@@ -125,7 +163,18 @@ const styles = StyleSheet.create({
   unavailable: { color: colors.error, fontSize: 13, lineHeight: 18 },
   sync: { color: colors.muted, fontSize: 13, paddingHorizontal: 8 },
   add: { alignSelf: 'flex-start' },
+  navScroll: { flex: 1 },
   nav: { gap: 4 },
+  favorites: { gap: 4, marginTop: 20 },
+  favoritesTitle: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    paddingHorizontal: 10,
+    marginBottom: 4,
+  },
   navItem: {
     minHeight: 44,
     flexDirection: 'row',
@@ -133,9 +182,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 10,
     borderRadius: 9,
+    gap: 8,
   },
+  navLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
   active: { backgroundColor: colors.hover },
-  navLabel: { color: colors.text, fontSize: 15 },
+  navLabel: { color: colors.text, fontSize: 15, flexShrink: 1 },
   navLabelSelected: { fontWeight: '600' },
   navCount: { color: colors.muted, fontSize: 13 },
 });

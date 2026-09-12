@@ -1,14 +1,15 @@
-import type { Task, TaskInput } from '../../data/repositories';
+import type { LabelRepository, Task, TaskInput } from '../../data/repositories';
 import { emptyTaskDraft, TaskForm, type TaskFormDraft } from './TaskForm';
 
 interface TaskEditorProps {
   task: Task | null;
   missing: boolean;
-  onSave: (input: TaskInput) => Promise<void>;
+  onSave: (input: TaskInput, labelIds?: string[]) => Promise<void>;
   onDelete: () => Promise<void>;
   onClose: () => void;
   today?: string;
   registerDirtyCheck?: (isDirty: () => boolean) => () => void;
+  labels?: LabelRepository;
 }
 
 export function TaskEditor({
@@ -19,7 +20,9 @@ export function TaskEditor({
   onClose,
   today,
   registerDirtyCheck,
+  labels,
 }: TaskEditorProps) {
+  const initialLabelIds = task?.labels.map((label) => label.id) ?? [];
   return (
     <TaskForm
       initial={task ? draftFromTask(task) : emptyTaskDraft}
@@ -31,8 +34,10 @@ export function TaskEditor({
       submitAccessibilityLabel="Save task"
       cancelAccessibilityLabel="Cancel editing"
       autoFocus={!missing}
+      submitLabels="when-changed"
       {...(today !== undefined ? { today } : {})}
       {...(registerDirtyCheck ? { registerDirtyCheck } : {})}
+      {...(labels ? { labels, initialLabelIds } : {})}
     />
   );
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { LabelSummary } from './label';
 
 export const taskPrioritySchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
@@ -22,6 +23,13 @@ export type Task = z.output<typeof taskInputSchema> & {
   id: string;
   createdAt: string;
   completedAt: string | null;
+  labels: LabelSummary[];
+};
+
+/** Present on update only when the editor changed the label selection. */
+export type TaskLabelEdit = {
+  labelIds: readonly string[];
+  baselineLabelIds: readonly string[];
 };
 
 export class TaskNotFoundError extends Error {

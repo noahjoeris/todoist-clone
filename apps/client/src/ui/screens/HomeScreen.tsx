@@ -19,10 +19,11 @@ import {
   View,
 } from 'react-native';
 import {
+  type LabelListItem,
+  type LabelRepository,
   type SyncStatusSource,
   type Task,
   type TaskActiveCounts,
-  type TaskDestination,
   type TaskInput,
   type TaskRepository,
   TaskRestoreConflictError,
@@ -47,11 +48,13 @@ import {
   requestDrawerClose,
   requestDrawerOpen,
 } from '../drawer-presence';
+import { type HomePane, isSamePane, taskDestinationOf } from '../home-pane';
 import { useCalendarToday } from '../hooks/useCalendarToday';
 import { useSyncStatus } from '../hooks/useSyncStatus';
 import { createTaskUndoController } from '../task-undo';
 import { groupTasksByScheduledDate, rescheduleInput, splitTodayGroups } from '../task-view-groups';
 import { colors } from '../theme';
+import { LabelsScreen } from './LabelsScreen';
 
 export type { AccountEntry };
 
@@ -64,12 +67,13 @@ type Composer =
 interface HomeScreenProps {
   repository: TaskRepository;
   account: AccountEntry;
-  destination: TaskDestination;
-  onDestinationChange: (destination: TaskDestination) => void;
+  pane: HomePane;
+  onPaneChange: (pane: HomePane) => void;
   upcomingDays: number;
   onLoadMoreUpcoming: () => void;
   banner?: ReactNode;
   sync?: SyncStatusSource;
+  labels?: LabelRepository;
 }
 
 const SYNC_LABEL: Record<NonNullable<ReturnType<typeof useSyncStatus>>, string> = {
@@ -78,7 +82,10 @@ const SYNC_LABEL: Record<NonNullable<ReturnType<typeof useSyncStatus>>, string> 
   synced: 'Synced',
 };
 
-const EMPTY_COPY: Record<TaskDestination, { title: string; text: string }> = {
+const EMPTY_COPY: Record<
+  'inbox' | 'today' | 'upcoming' | 'label',
+  { title: string; text: string }
+> = {
   inbox: {
     title: 'A little space to get things done.',
     text: 'Add your first task to get started.',
@@ -91,17 +98,22 @@ const EMPTY_COPY: Record<TaskDestination, { title: string; text: string }> = {
     title: 'Nothing upcoming in this range.',
     text: 'Tasks scheduled after today appear here. Load more to look further ahead.',
   },
+  label: {
+    title: 'No tasks with this label.',
+    text: 'Add a task and it will include this label.',
+  },
 };
 
 export function HomeScreen({
   repository,
   account,
-  destination,
-  onDestinationChange,
+  pane,
+  onPaneChange,
   upcomingDays,
   onLoadMoreUpcoming,
   banner,
   sync,
+  labels,
 }: HomeScreenProps) {
   const today = useCalendarToday();
   const { width } = useWindowDimensions();
@@ -113,12 +125,15 @@ export function HomeScreen({
 
   const [active, setActive] = useState<Task[]>([]);
   const [completed, setCompleted] = useState<Task[]>([]);
+  const [labelItems, setLabelItems] = useState<LabelListItem[]>([]);
+  const [labelsReady, setLabelsReady] = useState(false);
   const [counts, setCounts] = useState<TaskActiveCounts>({ inbox: 0, today: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [composer, setComposer] = useState<Composer>({ kind: 'closed' });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingBaseline, setEditingBaseline] = useState<string[]>([]);
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -133,14 +148,23 @@ export function HomeScreen({
   const undoState = useSyncExternalStore(undo.subscribe, undo.getState, undo.getState);
   const upcoming = useMemo(() => upcomingBounds(today, upcomingDays), [today, upcomingDays]);
 
+  const destination = taskDestinationOf(pane);
+  const viewingLabel = pane.type === 'label' ? pane.labelId : null;
   const activeQuery = useMemo(
-    () => viewQuery(destination, today, upcoming, 'active'),
-    [destination, today, upcoming],
+    () => viewQuery(pane, today, upcoming, 'active'),
+    [pane, today, upcoming],
   );
   const completedQuery = useMemo(
-    () => viewQuery(destination, today, upcoming, 'completed'),
-    [destination, today, upcoming],
+    () => viewQuery(pane, today, upcoming, 'completed'),
+    [pane, today, upcoming],
   );
+  const favoriteLabels = useMemo(
+    () => labelItems.filter((label) => label.isFavorite),
+    [labelItems],
+  );
+  const currentLabel = viewingLabel
+    ? (labelItems.find((label) => label.id === viewingLabel) ?? null)
+    : null;
 
   useEffect(() => () => undo.dismiss(), [undo]);
 
@@ -152,6 +176,13 @@ export function HomeScreen({
 
   useEffect(() => {
     void retry;
+    if (activeQuery == null || completedQuery == null) {
+      setActive([]);
+      setCompleted([]);
+      setLoading(false);
+      setError(false);
+      return;
+    }
     setLoading(true);
     setError(false);
     let activeReady = false;
@@ -200,6 +231,31 @@ export function HomeScreen({
     return repository.subscribeActiveCounts(today, setCounts, () => {});
   }, [repository, today]);
 
+  useEffect(() => {
+    if (!labels) {
+      setLabelItems([]);
+      setLabelsReady(false);
+      return;
+    }
+    setLabelsReady(false);
+    return labels.subscribe(
+      (items) => {
+        setLabelItems(items);
+        setLabelsReady(true);
+      },
+      () => {
+        setLabelsReady(true);
+      },
+    );
+  }, [labels]);
+
+  useEffect(() => {
+    if (pane.type !== 'label' || !labelsReady) return;
+    if (!labelItems.some((label) => label.id === pane.labelId)) {
+      onPaneChange({ type: 'inbox' });
+    }
+  }, [pane, labelsReady, labelItems, onPaneChange]);
+
   const registerDirtyCheck = useCallback((isDirty: () => boolean) => {
     dirtyCheckRef.current = isDirty;
     return () => {
@@ -218,6 +274,7 @@ export function HomeScreen({
   function closeForms() {
     setComposer({ kind: 'closed' });
     setEditingId(null);
+    setEditingBaseline([]);
     setReschedulingId(null);
   }
 
@@ -246,11 +303,19 @@ export function HomeScreen({
   async function openTask(task: Task) {
     if (!(await confirmLeave())) return;
     setEditingId(task.id);
+    setEditingBaseline(task.labels.map((label) => label.id));
   }
 
-  async function saveEdit(input: TaskInput) {
+  async function saveEdit(input: TaskInput, labelIds?: string[]) {
     if (editingId == null) return;
-    await repository.update(editingId, input);
+    if (labelIds === undefined) {
+      await repository.update(editingId, input);
+      return;
+    }
+    await repository.update(editingId, input, {
+      labelIds,
+      baselineLabelIds: editingBaseline,
+    });
   }
 
   async function deleteEditing() {
@@ -277,16 +342,18 @@ export function HomeScreen({
     }
   }
 
-  async function selectDestination(next: TaskDestination) {
-    if (next !== destination) {
+  async function selectPane(next: HomePane) {
+    if (!isSamePane(pane, next)) {
       if (!(await confirmLeave())) return;
-      onDestinationChange(next);
+      setCompletedExpanded(false);
+      onPaneChange(next);
     }
     setPresence(requestDrawerClose);
   }
 
   async function addFromSidebar() {
     if (!(await confirmLeave())) return;
+    if (pane.type === 'labels') onPaneChange({ type: 'inbox' });
     setComposer({ kind: 'global' });
     setPresence(requestDrawerClose);
   }
@@ -309,19 +376,23 @@ export function HomeScreen({
         completed.find((task) => task.id === editingId) ??
         null);
   const editorMissing = editingId != null && editingTask == null;
-  const composerDate = defaultComposerDate(composer, destination, today);
-  const sections = buildSections(destination, active, today, addFromGroup);
-  const emptyCopy = EMPTY_COPY[destination];
+  const composerDate = defaultComposerDate(composer, pane, today);
+  const sections = buildSections(pane, active, today, addFromGroup);
+  const emptyCopy = EMPTY_COPY[pane.type === 'label' ? 'label' : (destination ?? 'inbox')];
   const composing = composer.kind !== 'closed';
+  const heading = headingForPane(pane, currentLabel);
+  const composerLabelIds =
+    composer.kind === 'view' && viewingLabel != null ? [viewingLabel] : undefined;
 
   const sidebar = (
     <Sidebar
       account={wrappedAccount}
-      destination={destination}
+      pane={pane}
       counts={counts}
       syncLabel={syncIndicator ? SYNC_LABEL[syncIndicator] : undefined}
-      onSelect={(next) => void selectDestination(next)}
+      onSelect={(next) => void selectPane(next)}
       onAddTask={() => void addFromSidebar()}
+      {...(labels ? { favoriteLabels } : {})}
     />
   );
 
@@ -340,128 +411,152 @@ export function HomeScreen({
           style={styles.screen}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <TaskList
-            sections={sections}
-            completed={completed}
-            completedExpanded={completedExpanded}
-            onToggleCompleted={() => setCompletedExpanded((open) => !open)}
-            {...(destination === 'upcoming'
-              ? { loadMore: { label: 'Load more', onPress: onLoadMoreUpcoming } }
-              : {})}
-            renderTask={(task) => (
-              <TaskRow
-                task={task}
-                today={today}
-                onOpen={(item) => void openTask(item)}
-                onSetCompletion={(item, completedValue) =>
-                  void runWrite(
-                    item.id,
-                    () => repository.setCompletion(item.id, completedValue),
-                    'Couldn’t update that task. Try again.',
-                  )
-                }
-                rescheduleOpen={reschedulingId === task.id}
-                onRescheduleOpen={() => setReschedulingId(task.id)}
-                onRescheduleClose={() => setReschedulingId(null)}
-                onReschedule={(date) =>
-                  void runWrite(
-                    task.id,
-                    () => repository.update(task.id, rescheduleInput(task, date)),
-                    'Couldn’t update that task. Try again.',
-                  ).then(() => setReschedulingId(null))
-                }
-              />
-            )}
-            empty={
-              loading ? (
-                <ActivityIndicator color={colors.muted} style={styles.empty} />
-              ) : !error && !composing && editingId == null ? (
-                <View style={styles.empty}>
-                  <Text style={styles.emptyTitle}>{emptyCopy.title}</Text>
-                  <Text style={styles.emptyText}>{emptyCopy.text}</Text>
-                </View>
-              ) : null
-            }
-            header={
-              <View style={styles.header}>
-                <View style={styles.heading}>
-                  {layoutMode === 'overlay' && (
-                    <Pressable
-                      ref={menuButtonRef}
-                      accessibilityRole="button"
-                      accessibilityLabel="Open navigation"
-                      onPress={() => setPresence(requestDrawerOpen)}
-                      style={({ pressed }) => [styles.menuButton, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.menuIcon}>☰</Text>
-                    </Pressable>
-                  )}
-                  <Text accessibilityRole="header" style={styles.title}>
-                    {destination === 'inbox'
-                      ? 'Inbox'
-                      : destination === 'today'
-                        ? 'Today'
-                        : 'Upcoming'}
-                  </Text>
-                  {!loading && (
-                    <Text style={styles.count}>
-                      {active.length} {active.length === 1 ? 'task' : 'tasks'}
+          {pane.type === 'labels' && labels ? (
+            <LabelsScreen
+              repository={labels}
+              onOpenLabel={(labelId) => void selectPane({ type: 'label', labelId })}
+              {...(layoutMode === 'overlay'
+                ? {
+                    leading: (
+                      <Pressable
+                        ref={menuButtonRef}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open navigation"
+                        onPress={() => setPresence(requestDrawerOpen)}
+                        style={({ pressed }) => [styles.menuButton, pressed && styles.pressed]}
+                      >
+                        <Text style={styles.menuIcon}>☰</Text>
+                      </Pressable>
+                    ),
+                  }
+                : {})}
+            />
+          ) : (
+            <TaskList
+              sections={sections}
+              completed={completed}
+              completedExpanded={completedExpanded}
+              onToggleCompleted={() => setCompletedExpanded((open) => !open)}
+              {...(destination === 'upcoming'
+                ? { loadMore: { label: 'Load more', onPress: onLoadMoreUpcoming } }
+                : {})}
+              renderTask={(task) => (
+                <TaskRow
+                  task={task}
+                  today={today}
+                  onOpen={(item) => void openTask(item)}
+                  onSetCompletion={(item, completedValue) =>
+                    void runWrite(
+                      item.id,
+                      () => repository.setCompletion(item.id, completedValue),
+                      'Couldn’t update that task. Try again.',
+                    )
+                  }
+                  rescheduleOpen={reschedulingId === task.id}
+                  onRescheduleOpen={() => setReschedulingId(task.id)}
+                  onRescheduleClose={() => setReschedulingId(null)}
+                  onReschedule={(date) =>
+                    void runWrite(
+                      task.id,
+                      () => repository.update(task.id, rescheduleInput(task, date)),
+                      'Couldn’t update that task. Try again.',
+                    ).then(() => setReschedulingId(null))
+                  }
+                />
+              )}
+              empty={
+                loading ? (
+                  <ActivityIndicator color={colors.muted} style={styles.empty} />
+                ) : !error && !composing && editingId == null ? (
+                  <View style={styles.empty}>
+                    <Text style={styles.emptyTitle}>{emptyCopy.title}</Text>
+                    <Text style={styles.emptyText}>{emptyCopy.text}</Text>
+                  </View>
+                ) : null
+              }
+              header={
+                <View style={styles.header}>
+                  <View style={styles.heading}>
+                    {layoutMode === 'overlay' && (
+                      <Pressable
+                        ref={menuButtonRef}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open navigation"
+                        onPress={() => setPresence(requestDrawerOpen)}
+                        style={({ pressed }) => [styles.menuButton, pressed && styles.pressed]}
+                      >
+                        <Text style={styles.menuIcon}>☰</Text>
+                      </Pressable>
+                    )}
+                    <Text accessibilityRole="header" style={styles.title}>
+                      {heading}
                     </Text>
-                  )}
-                </View>
-                {undoState && (
-                  <UndoBanner
-                    message={`Deleted “${undoState.task.title}”.`}
-                    pending={undoPending}
-                    error={undoError}
-                    onUndo={() => void undoDelete()}
-                  />
-                )}
-                {editingId ? (
-                  <TaskEditor
-                    key={editingId}
-                    task={editingTask}
-                    missing={editorMissing}
-                    today={today}
-                    registerDirtyCheck={registerDirtyCheck}
-                    onSave={saveEdit}
-                    onDelete={deleteEditing}
-                    onClose={() => setEditingId(null)}
-                  />
-                ) : composing ? (
-                  <TaskComposer
-                    key={`${composer.kind}:${composerDate ?? 'none'}`}
-                    initialDate={composerDate}
-                    today={today}
-                    registerDirtyCheck={registerDirtyCheck}
-                    onCreate={repository.create}
-                    onClose={() => setComposer({ kind: 'closed' })}
-                  />
-                ) : (
-                  <View style={styles.add}>
-                    <ActionButton
-                      label="+ Add task"
-                      color={colors.accent}
-                      onPress={() => void addFromView()}
+                    {!loading && pane.type !== 'labels' && (
+                      <Text style={styles.count}>
+                        {active.length} {active.length === 1 ? 'task' : 'tasks'}
+                      </Text>
+                    )}
+                  </View>
+                  {undoState && (
+                    <UndoBanner
+                      message={`Deleted “${undoState.task.title}”.`}
+                      pending={undoPending}
+                      error={undoError}
+                      onUndo={() => void undoDelete()}
                     />
-                  </View>
-                )}
-                {actionError && (
-                  <Text accessibilityRole="alert" style={styles.error}>
-                    {actionError}
-                  </Text>
-                )}
-                {error && (
-                  <View style={styles.failure}>
+                  )}
+                  {editingId ? (
+                    <TaskEditor
+                      key={editingId}
+                      task={editingTask}
+                      missing={editorMissing}
+                      today={today}
+                      registerDirtyCheck={registerDirtyCheck}
+                      onSave={saveEdit}
+                      onDelete={deleteEditing}
+                      onClose={() => {
+                        setEditingId(null);
+                        setEditingBaseline([]);
+                      }}
+                      {...(labels ? { labels } : {})}
+                    />
+                  ) : composing ? (
+                    <TaskComposer
+                      key={`${composer.kind}:${composerDate ?? 'none'}`}
+                      initialDate={composerDate}
+                      today={today}
+                      registerDirtyCheck={registerDirtyCheck}
+                      onCreate={(input, labelIds) => repository.create(input, labelIds)}
+                      onClose={() => setComposer({ kind: 'closed' })}
+                      {...(labels ? { labels } : {})}
+                      {...(composerLabelIds ? { initialLabelIds: composerLabelIds } : {})}
+                    />
+                  ) : (
+                    <View style={styles.add}>
+                      <ActionButton
+                        label="+ Add task"
+                        color={colors.accent}
+                        onPress={() => void addFromView()}
+                      />
+                    </View>
+                  )}
+                  {actionError && (
                     <Text accessibilityRole="alert" style={styles.error}>
-                      Couldn’t load your tasks.
+                      {actionError}
                     </Text>
-                    <ActionButton label="Retry" onPress={() => setRetry((value) => value + 1)} />
-                  </View>
-                )}
-              </View>
-            }
-          />
+                  )}
+                  {error && (
+                    <View style={styles.failure}>
+                      <Text accessibilityRole="alert" style={styles.error}>
+                        Couldn’t load your tasks.
+                      </Text>
+                      <ActionButton label="Retry" onPress={() => setRetry((value) => value + 1)} />
+                    </View>
+                  )}
+                </View>
+              }
+            />
+          )}
         </KeyboardAvoidingView>
       </AppShell>
     </SafeAreaView>
@@ -469,13 +564,15 @@ export function HomeScreen({
 }
 
 function viewQuery(
-  destination: TaskDestination,
+  pane: HomePane,
   today: string,
   upcoming: { startInclusive: string; endExclusive: string },
   completion: 'active' | 'completed',
-): TaskViewQuery {
-  if (destination === 'inbox') return { destination: 'inbox', completion };
-  if (destination === 'today') return { destination: 'today', today, completion };
+): TaskViewQuery | null {
+  if (pane.type === 'labels') return null;
+  if (pane.type === 'inbox') return { destination: 'inbox', completion };
+  if (pane.type === 'today') return { destination: 'today', today, completion };
+  if (pane.type === 'label') return { destination: 'label', labelId: pane.labelId, completion };
   return {
     destination: 'upcoming',
     startInclusive: upcoming.startInclusive,
@@ -484,26 +581,32 @@ function viewQuery(
   };
 }
 
-function defaultComposerDate(
-  composer: Composer,
-  destination: TaskDestination,
-  today: string,
-): string | null {
+function defaultComposerDate(composer: Composer, pane: HomePane, today: string): string | null {
   if (composer.kind === 'global' || composer.kind === 'closed') return null;
   if (composer.kind === 'group') return composer.date;
-  if (destination === 'today') return today;
+  if (pane.type === 'today') return today;
   return null;
 }
 
+function headingForPane(pane: HomePane, currentLabel: LabelListItem | null): string {
+  if (pane.type === 'today') return 'Today';
+  if (pane.type === 'upcoming') return 'Upcoming';
+  if (pane.type === 'labels') return 'Labels';
+  if (pane.type === 'label') return currentLabel?.name ?? 'Label';
+  return 'Inbox';
+}
+
 function buildSections(
-  destination: TaskDestination,
+  pane: HomePane,
   active: Task[],
   today: string,
   onAddGroup: (date: string) => void,
 ): TaskSection[] {
   const now = new Date(`${today}T12:00:00`);
-  if (destination === 'inbox') return [{ key: 'inbox', tasks: active }];
-  if (destination === 'today') {
+  if (pane.type === 'inbox' || pane.type === 'label' || pane.type === 'labels') {
+    return [{ key: pane.type, tasks: active }];
+  }
+  if (pane.type === 'today') {
     const { overdue, dueToday } = splitTodayGroups(active, today);
     const sections: TaskSection[] = [];
     if (overdue.length > 0) sections.push({ key: 'overdue', title: 'Overdue', tasks: overdue });

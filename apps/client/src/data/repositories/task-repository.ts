@@ -1,7 +1,10 @@
 import type { CommonPowerSyncDatabase } from '@powersync/common';
+import { type LabelSummary, parseLabelColor, sortLabelsByName } from './label';
+import { diffLabelAssociations, uniqueIds } from './label-associations';
 import {
   type Task,
   type TaskInput,
+  type TaskLabelEdit,
   TaskNotFoundError,
   TaskRestoreConflictError,
   taskInputSchema,
@@ -14,8 +17,8 @@ import {
 } from './task-view';
 
 export interface TaskRepository {
-  create(input: TaskInput): Promise<void>;
-  update(id: string, input: TaskInput): Promise<void>;
+  create(input: TaskInput, labelIds?: readonly string[]): Promise<void>;
+  update(id: string, input: TaskInput, labels?: TaskLabelEdit): Promise<void>;
   /** Complete or reopen explicitly; does not toggle from UI state. */
   setCompletion(id: string, completed: boolean): Promise<void>;
   /** Reads a snapshot and deletes in one local write. */
@@ -56,10 +59,25 @@ type TaskRow = {
   scheduledTime: string | null;
   completedAt: string | null;
   createdAt: string;
+  labelId?: string | null;
+  labelName?: string | null;
+  labelColor?: string | null;
+};
+
+type TaskTx = {
+  getOptional: CommonPowerSyncDatabase['getOptional'];
+  getAll: CommonPowerSyncDatabase['getAll'];
+  execute: CommonPowerSyncDatabase['execute'];
 };
 
 const TASK_COLUMNS = `id, title, description, priority, scheduled_date AS scheduledDate,
   scheduled_time AS scheduledTime, completed_at AS completedAt, created_at AS createdAt`;
+
+const TASK_TABLE_COLUMNS = `t.id, t.title, t.description, t.priority, t.scheduled_date AS scheduledDate,
+  t.scheduled_time AS scheduledTime, t.completed_at AS completedAt, t.created_at AS createdAt,
+  l.id AS labelId, l.name AS labelName, l.color AS labelColor`;
+
+const ACCOUNT_WATCH_TABLES = ['tasks', 'labels', 'task_labels'];
 
 export function createTaskRepositories(
   database: TaskDatabase,
@@ -94,7 +112,7 @@ function createTableTaskRepository(
   target: TaskTarget,
 ): TaskRepository {
   return {
-    async create(input) {
+    async create(input, labelIds) {
       const task = taskInputSchema.parse(input);
       const id = generateId();
       const createdAt = new Date().toISOString();
@@ -116,26 +134,31 @@ function createTableTaskRepository(
         );
         return;
       }
-      await database.execute(
-        `INSERT INTO tasks
-          (id, user_id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          id,
-          target.userId,
-          task.title,
-          task.description,
-          task.priority,
-          task.scheduledDate,
-          task.scheduledTime,
-          null,
-          createdAt,
-          createdAt,
-        ],
-      );
+
+      const selected = uniqueIds(labelIds ?? []);
+      await database.writeTransaction(async (tx) => {
+        await tx.execute(
+          `INSERT INTO tasks
+            (id, user_id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            id,
+            target.userId,
+            task.title,
+            task.description,
+            task.priority,
+            task.scheduledDate,
+            task.scheduledTime,
+            null,
+            createdAt,
+            createdAt,
+          ],
+        );
+        await attachLabels(tx, generateId, target.userId, id, selected, createdAt);
+      });
     },
 
-    async update(id, input) {
+    async update(id, input, labels) {
       const task = taskInputSchema.parse(input);
       await database.writeTransaction(async (tx) => {
         const current = await readOwnedTask(tx, target, id);
@@ -163,20 +186,28 @@ function createTableTaskRepository(
           assignments.push('scheduled_time = ?');
           params.push(task.scheduledTime);
         }
-        if (assignments.length === 0) return;
 
-        if (target.table === 'tasks') {
-          assignments.push('updated_at = ?');
-          params.push(new Date().toISOString());
-          params.push(id, target.userId);
-          await tx.execute(
-            `UPDATE tasks SET ${assignments.join(', ')} WHERE id = ? AND user_id = ?`,
-            params,
-          );
-          return;
+        if (assignments.length > 0) {
+          if (target.table === 'tasks') {
+            assignments.push('updated_at = ?');
+            params.push(new Date().toISOString());
+            params.push(id, target.userId);
+            await tx.execute(
+              `UPDATE tasks SET ${assignments.join(', ')} WHERE id = ? AND user_id = ?`,
+              params,
+            );
+          } else {
+            params.push(id);
+            await tx.execute(
+              `UPDATE local_tasks SET ${assignments.join(', ')} WHERE id = ?`,
+              params,
+            );
+          }
         }
-        params.push(id);
-        await tx.execute(`UPDATE local_tasks SET ${assignments.join(', ')} WHERE id = ?`, params);
+
+        if (labels && target.table === 'tasks') {
+          await syncTaskLabels(tx, generateId, target.userId, id, labels);
+        }
       });
     },
 
@@ -201,6 +232,10 @@ function createTableTaskRepository(
         const current = await readOwnedTask(tx, target, id);
         if (current === null) throw new TaskNotFoundError();
         if (target.table === 'tasks') {
+          await tx.execute('DELETE FROM task_labels WHERE task_id = ? AND user_id = ?', [
+            id,
+            target.userId,
+          ]);
           await tx.execute('DELETE FROM tasks WHERE id = ? AND user_id = ?', [id, target.userId]);
         } else {
           await tx.execute('DELETE FROM local_tasks WHERE id = ?', [id]);
@@ -253,30 +288,44 @@ function createTableTaskRepository(
             now,
           ],
         );
+        await attachLabels(
+          tx,
+          generateId,
+          target.userId,
+          task.id,
+          task.labels.map((label) => label.id),
+          now,
+        );
       });
     },
 
     subscribe(onTasks, onError) {
-      const query =
-        target.table === 'local_tasks'
-          ? {
-              sql: `SELECT ${TASK_COLUMNS}
+      if (target.table === 'local_tasks') {
+        return watchQuery<TaskRow>(
+          database,
+          `SELECT ${TASK_COLUMNS}
          FROM local_tasks ORDER BY created_at DESC, id DESC`,
-              parameters: [] as string[],
-            }
-          : {
-              sql: `SELECT ${TASK_COLUMNS}
-         FROM tasks WHERE user_id = ? ORDER BY created_at DESC, id DESC`,
-              parameters: [target.userId],
-            };
+          [],
+          (rows) => {
+            onTasks(rows.map(mapGuestTaskRow));
+          },
+          onError,
+        );
+      }
       return watchQuery<TaskRow>(
         database,
-        query.sql,
-        query.parameters,
+        `SELECT ${TASK_TABLE_COLUMNS}
+         FROM tasks t
+         LEFT JOIN task_labels tl ON tl.task_id = t.id AND tl.user_id = t.user_id
+         LEFT JOIN labels l ON l.id = tl.label_id AND l.user_id = t.user_id
+         WHERE t.user_id = ?
+         ORDER BY t.created_at DESC, t.id DESC, lower(l.name) ASC, l.id ASC`,
+        [target.userId],
         (rows) => {
-          onTasks(rows.map(mapTaskRow));
+          onTasks(collectAccountTasks(rows));
         },
         onError,
+        ACCOUNT_WATCH_TABLES,
       );
     },
 
@@ -287,9 +336,12 @@ function createTableTaskRepository(
         compiled.sql,
         compiled.parameters,
         (rows) => {
-          onTasks(rows.map(mapTaskRow));
+          onTasks(
+            target.table === 'local_tasks' ? rows.map(mapGuestTaskRow) : collectAccountTasks(rows),
+          );
         },
         onError,
+        target.table === 'tasks' ? ACCOUNT_WATCH_TABLES : undefined,
       );
     },
 
@@ -325,15 +377,67 @@ function compileViewQuery(
   target: TaskTarget,
   query: TaskViewQuery,
 ): { sql: string; parameters: string[] } {
-  const owner = ownerScope(target);
   const view = viewPredicate(query);
-  return {
-    sql: `SELECT ${TASK_COLUMNS}
+
+  if (target.table === 'local_tasks') {
+    if (query.destination === 'label') {
+      return {
+        sql: `SELECT ${TASK_COLUMNS} FROM local_tasks WHERE 0`,
+        parameters: [],
+      };
+    }
+    const owner = ownerScope(target);
+    return {
+      sql: `SELECT ${TASK_COLUMNS}
          FROM ${owner.from}
          WHERE ${owner.sql} AND ${view.sql}
          ${viewOrderSql(query)}`,
-    parameters: [...owner.params, ...view.params],
+      parameters: [...owner.params, ...view.params],
+    };
+  }
+
+  const userId = target.userId;
+  const viewSql = qualifyTaskColumns(view.sql);
+  if (query.destination === 'label') {
+    return {
+      sql: `SELECT ${TASK_TABLE_COLUMNS}
+         FROM tasks t
+         INNER JOIN task_labels membership
+           ON membership.task_id = t.id AND membership.label_id = ? AND membership.user_id = t.user_id
+         LEFT JOIN task_labels tl ON tl.task_id = t.id AND tl.user_id = t.user_id
+         LEFT JOIN labels l ON l.id = tl.label_id AND l.user_id = t.user_id
+         WHERE t.user_id = ? AND ${viewSql}
+         ${qualifyOrderSql(viewOrderSql(query))}, lower(l.name) ASC, l.id ASC`,
+      parameters: [query.labelId, userId, ...view.params],
+    };
+  }
+
+  return {
+    sql: `SELECT ${TASK_TABLE_COLUMNS}
+         FROM tasks t
+         LEFT JOIN task_labels tl ON tl.task_id = t.id AND tl.user_id = t.user_id
+         LEFT JOIN labels l ON l.id = tl.label_id AND l.user_id = t.user_id
+         WHERE t.user_id = ? AND ${viewSql}
+         ${qualifyOrderSql(viewOrderSql(query))}, lower(l.name) ASC, l.id ASC`,
+    parameters: [userId, ...view.params],
   };
+}
+
+function qualifyTaskColumns(sql: string): string {
+  return sql
+    .replaceAll('completed_at', 't.completed_at')
+    .replaceAll('scheduled_date', 't.scheduled_date');
+}
+
+function qualifyOrderSql(order: string): string {
+  return order
+    .replaceAll('completed_at', 't.completed_at')
+    .replaceAll('scheduled_date', 't.scheduled_date')
+    .replaceAll('scheduled_time', 't.scheduled_time')
+    .replaceAll('priority', 't.priority')
+    .replaceAll('created_at', 't.created_at')
+    .replaceAll(', id ', ', t.id ')
+    .replaceAll(' id DESC', ' t.id DESC');
 }
 
 function compileActiveCountQuery(
@@ -357,6 +461,7 @@ function watchQuery<T>(
   parameters: string[],
   onRows: (rows: T[]) => void,
   onError: (error: Error) => void,
+  triggerOnTables?: string[],
 ): () => void {
   const controller = new AbortController();
   database.watchWithCallback(
@@ -370,28 +475,32 @@ function watchQuery<T>(
         if (!controller.signal.aborted) onError(error);
       },
     },
-    { signal: controller.signal },
+    triggerOnTables
+      ? { signal: controller.signal, tables: triggerOnTables }
+      : { signal: controller.signal },
   );
   return () => controller.abort();
 }
 
-async function readOwnedTask(
-  tx: { getOptional: CommonPowerSyncDatabase['getOptional'] },
-  target: TaskTarget,
-  id: string,
-): Promise<Task | null> {
+async function readOwnedTask(tx: TaskTx, target: TaskTarget, id: string): Promise<Task | null> {
   if (target.table === 'local_tasks') {
     const row = await tx.getOptional<TaskRow>(
       `SELECT ${TASK_COLUMNS} FROM local_tasks WHERE id = ?`,
       [id],
     );
-    return row ? mapTaskRow(row) : null;
+    return row ? mapGuestTaskRow(row) : null;
   }
-  const row = await tx.getOptional<TaskRow>(
-    `SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ? AND user_id = ?`,
+  const rows = await tx.getAll<TaskRow>(
+    `SELECT ${TASK_TABLE_COLUMNS}
+     FROM tasks t
+     LEFT JOIN task_labels tl ON tl.task_id = t.id AND tl.user_id = t.user_id
+     LEFT JOIN labels l ON l.id = tl.label_id AND l.user_id = t.user_id
+     WHERE t.id = ? AND t.user_id = ?
+     ORDER BY lower(l.name) ASC, l.id ASC`,
     [id, target.userId],
   );
-  return row ? mapTaskRow(row) : null;
+  if (rows.length === 0) return null;
+  return collectAccountTasks(rows)[0] ?? null;
 }
 
 async function writeCompletion(
@@ -410,7 +519,86 @@ async function writeCompletion(
   );
 }
 
-function mapTaskRow(row: TaskRow): Task {
+async function syncTaskLabels(
+  tx: TaskTx,
+  generateId: () => string,
+  userId: string,
+  taskId: string,
+  edit: TaskLabelEdit,
+): Promise<void> {
+  const currentRows = await tx.getAll<{ label_id: string }>(
+    'SELECT label_id FROM task_labels WHERE task_id = ? AND user_id = ?',
+    [taskId, userId],
+  );
+  const current = currentRows.map((row) => row.label_id);
+  const { attach, detach } = diffLabelAssociations(
+    edit.baselineLabelIds,
+    current,
+    uniqueIds(edit.labelIds),
+  );
+  for (const labelId of detach) {
+    await tx.execute('DELETE FROM task_labels WHERE task_id = ? AND label_id = ? AND user_id = ?', [
+      taskId,
+      labelId,
+      userId,
+    ]);
+  }
+  await attachLabels(tx, generateId, userId, taskId, attach, new Date().toISOString());
+}
+
+async function attachLabels(
+  tx: TaskTx,
+  generateId: () => string,
+  userId: string,
+  taskId: string,
+  labelIds: readonly string[],
+  createdAt: string,
+): Promise<void> {
+  for (const labelId of uniqueIds(labelIds)) {
+    const label = await tx.getOptional<{ id: string }>(
+      'SELECT id FROM labels WHERE id = ? AND user_id = ?',
+      [labelId, userId],
+    );
+    if (!label) continue;
+    const existing = await tx.getOptional<{ id: string }>(
+      'SELECT id FROM task_labels WHERE task_id = ? AND label_id = ? AND user_id = ?',
+      [taskId, labelId, userId],
+    );
+    if (existing) continue;
+    await tx.execute(
+      `INSERT INTO task_labels (id, user_id, task_id, label_id, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [generateId(), userId, taskId, labelId, createdAt],
+    );
+  }
+}
+
+function collectAccountTasks(rows: TaskRow[]): Task[] {
+  const tasks: Task[] = [];
+  const byId = new Map<string, Task>();
+  for (const row of rows) {
+    let task = byId.get(row.id);
+    if (!task) {
+      task = mapTaskFields(row);
+      byId.set(row.id, task);
+      tasks.push(task);
+    }
+    const summary = labelSummaryFromRow(row);
+    if (summary && !task.labels.some((label) => label.id === summary.id)) {
+      task.labels.push(summary);
+    }
+  }
+  for (const task of tasks) {
+    task.labels = sortLabelsByName(task.labels);
+  }
+  return tasks;
+}
+
+function mapGuestTaskRow(row: TaskRow): Task {
+  return { ...mapTaskFields(row), labels: [] };
+}
+
+function mapTaskFields(row: TaskRow): Task {
   return {
     id: row.id,
     title: row.title,
@@ -420,6 +608,16 @@ function mapTaskRow(row: TaskRow): Task {
     scheduledTime: normalizeScheduledTime(row.scheduledTime),
     completedAt: row.completedAt == null ? null : normalizeTimestamptz(row.completedAt),
     createdAt: normalizeTimestamptz(row.createdAt),
+    labels: [],
+  };
+}
+
+function labelSummaryFromRow(row: TaskRow): LabelSummary | null {
+  if (row.labelId == null || row.labelName == null || row.labelColor == null) return null;
+  return {
+    id: row.labelId,
+    name: row.labelName,
+    color: parseLabelColor(row.labelColor),
   };
 }
 

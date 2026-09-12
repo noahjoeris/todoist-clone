@@ -12,7 +12,8 @@ export type TaskViewQuery =
       startInclusive: string;
       endExclusive: string;
       completion: TaskCompletionSelection;
-    };
+    }
+  | { destination: 'label'; labelId: string; completion: TaskCompletionSelection };
 
 export type TaskActiveCounts = {
   inbox: number;
@@ -37,6 +38,8 @@ export function viewPredicate(query: TaskViewQuery): { sql: string; params: stri
         sql: `${completion} AND scheduled_date >= ? AND scheduled_date < ?`,
         params: [query.startInclusive, query.endExclusive],
       };
+    case 'label':
+      return { sql: completion, params: [] };
   }
 }
 
@@ -44,7 +47,7 @@ export function viewOrderSql(query: TaskViewQuery): string {
   if (query.completion === 'completed') {
     return 'ORDER BY completed_at DESC, id DESC';
   }
-  if (query.destination === 'inbox') {
+  if (query.destination === 'inbox' || query.destination === 'label') {
     return 'ORDER BY priority ASC, created_at DESC, id DESC';
   }
   return `ORDER BY scheduled_date ASC, CASE WHEN scheduled_time IS NULL THEN 1 ELSE 0 END ASC, scheduled_time ASC, priority ASC, created_at DESC, id DESC`;

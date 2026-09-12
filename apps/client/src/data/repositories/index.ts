@@ -29,10 +29,31 @@ export {
   type GuestTaskAdoptionRepository,
   type GuestTaskAdoptionState,
 } from './guest-task-adoption';
+export {
+  LABEL_COLORS,
+  type LabelColor,
+  LabelDuplicateNameError,
+  type LabelFields,
+  type LabelInput,
+  type LabelListItem,
+  LabelNotFoundError,
+  type LabelPatch,
+  type LabelSummary,
+  labelInputSchema,
+  labelNameSchema,
+} from './label';
+export { sameIdSet } from './label-associations';
+export {
+  createLabelRepositories,
+  createLabelRepository,
+  type LabelRepositories,
+  type LabelRepository,
+} from './label-repository';
 export type { ClientSyncStatus, SyncStatusSource } from './sync';
 export {
   type Task,
   type TaskInput,
+  type TaskLabelEdit,
   TaskNotFoundError,
   type TaskPriority,
   TaskRestoreConflictError,
