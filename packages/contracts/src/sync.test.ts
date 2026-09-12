@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   crudEntrySchema,
+  LABEL_COLORS,
+  labelColumnsSchema,
+  labelPatchColumnsSchema,
   mergeScheduledColumns,
   taskColumnsSchema,
+  taskLabelColumnsSchema,
   taskPatchColumnsSchema,
   uploadErrorSchema,
   uploadRequestSchema,
@@ -236,6 +240,188 @@ describe('mergeScheduledColumns', () => {
   });
 });
 
+const LABEL_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const TASK_LABEL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+
+const validLabelPutData = {
+  name: 'Work',
+  color: 'charcoal' as const,
+  is_favorite: false,
+  created_at: CREATED_AT,
+};
+
+describe('LABEL_COLORS', () => {
+  it("is Todoist's 20-color palette in documented order", () => {
+    expect(LABEL_COLORS).toEqual([
+      'berry_red',
+      'red',
+      'orange',
+      'yellow',
+      'olive_green',
+      'lime_green',
+      'green',
+      'mint_green',
+      'teal',
+      'sky_blue',
+      'light_blue',
+      'blue',
+      'grape',
+      'violet',
+      'lavender',
+      'magenta',
+      'salmon',
+      'charcoal',
+      'grey',
+      'taupe',
+    ]);
+  });
+});
+
+describe('labelColumnsSchema', () => {
+  it('trims the name and defaults color and favorite', () => {
+    expect(
+      labelColumnsSchema.parse({
+        name: '  Work  ',
+        created_at: CREATED_AT,
+      }),
+    ).toEqual({
+      name: 'Work',
+      color: 'charcoal',
+      is_favorite: false,
+      created_at: CREATED_AT,
+    });
+  });
+
+  it('strips id, user_id, updated_at and other extras', () => {
+    expect(
+      labelColumnsSchema.parse({
+        ...validLabelPutData,
+        id: LABEL_ID,
+        user_id: USER_ID,
+        updated_at: '2026-09-11T12:00:01.000Z',
+        extra: 'ignored',
+      }),
+    ).toEqual(validLabelPutData);
+  });
+
+  it('rejects an empty name', () => {
+    expect(labelColumnsSchema.safeParse({ ...validLabelPutData, name: '  ' }).success).toBe(false);
+  });
+
+  it('rejects a name longer than 60 characters', () => {
+    expect(
+      labelColumnsSchema.safeParse({ ...validLabelPutData, name: 'a'.repeat(61) }).success,
+    ).toBe(false);
+  });
+
+  it('accepts a 60-character name', () => {
+    expect(labelColumnsSchema.parse({ ...validLabelPutData, name: 'a'.repeat(60) }).name).toBe(
+      'a'.repeat(60),
+    );
+  });
+
+  it('rejects an unknown color', () => {
+    expect(labelColumnsSchema.safeParse({ ...validLabelPutData, color: 'pink' }).success).toBe(
+      false,
+    );
+  });
+
+  it.each(LABEL_COLORS)('accepts color %s', (color) => {
+    expect(labelColumnsSchema.parse({ ...validLabelPutData, color }).color).toBe(color);
+  });
+
+  it.each([
+    [0, false],
+    [1, true],
+    [false, false],
+    [true, true],
+  ] as const)('normalizes favorite wire value %s to %s', (input, expected) => {
+    expect(labelColumnsSchema.parse({ ...validLabelPutData, is_favorite: input }).is_favorite).toBe(
+      expected,
+    );
+  });
+
+  it.each([2, '1', 'true', null])('rejects non-boolean favorite wire value %s', (is_favorite) => {
+    expect(labelColumnsSchema.safeParse({ ...validLabelPutData, is_favorite }).success).toBe(false);
+  });
+
+  it.each(['2026-09-11 15:00:00.000Z', '2026-09-11 15:00:00.000000Z'] as const)(
+    'accepts PowerSync space-separated created_at %s',
+    (created_at) => {
+      expect(labelColumnsSchema.parse({ ...validLabelPutData, created_at }).created_at).toBe(
+        created_at.replace(' ', 'T'),
+      );
+    },
+  );
+});
+
+describe('labelPatchColumnsSchema', () => {
+  it('accepts a single column', () => {
+    expect(labelPatchColumnsSchema.parse({ name: ' Renamed ' })).toEqual({ name: 'Renamed' });
+  });
+
+  it('treats a payload of only server-owned keys as empty after strip', () => {
+    expect(
+      labelPatchColumnsSchema.parse({ id: LABEL_ID, user_id: USER_ID, updated_at: CREATED_AT }),
+    ).toEqual({});
+  });
+
+  it('omits color and favorite when they are not in the patch', () => {
+    expect(labelPatchColumnsSchema.parse({ name: 'Renamed' })).toEqual({ name: 'Renamed' });
+  });
+
+  it('accepts explicit false favorite without coercing from other values', () => {
+    expect(labelPatchColumnsSchema.parse({ is_favorite: 0 })).toEqual({ is_favorite: false });
+  });
+
+  it('rejects an unknown color', () => {
+    expect(labelPatchColumnsSchema.safeParse({ color: 'hot_pink' }).success).toBe(false);
+  });
+
+  it('rejects a blank name', () => {
+    expect(labelPatchColumnsSchema.safeParse({ name: '  ' }).success).toBe(false);
+  });
+});
+
+describe('taskLabelColumnsSchema', () => {
+  it('accepts task_id, label_id and created_at', () => {
+    expect(
+      taskLabelColumnsSchema.parse({
+        task_id: TASK_ID,
+        label_id: LABEL_ID,
+        created_at: CREATED_AT,
+      }),
+    ).toEqual({
+      task_id: TASK_ID,
+      label_id: LABEL_ID,
+      created_at: CREATED_AT,
+    });
+  });
+
+  it('strips id, user_id and extras', () => {
+    expect(
+      taskLabelColumnsSchema.parse({
+        task_id: TASK_ID,
+        label_id: LABEL_ID,
+        created_at: CREATED_AT,
+        id: TASK_LABEL_ID,
+        user_id: USER_ID,
+        extra: 'ignored',
+      }),
+    ).toEqual({
+      task_id: TASK_ID,
+      label_id: LABEL_ID,
+      created_at: CREATED_AT,
+    });
+  });
+
+  it('rejects a missing task_id', () => {
+    expect(
+      taskLabelColumnsSchema.safeParse({ label_id: LABEL_ID, created_at: CREATED_AT }).success,
+    ).toBe(false);
+  });
+});
+
 describe('crudEntrySchema', () => {
   it('accepts a PUT', () => {
     expect(
@@ -279,6 +465,89 @@ describe('crudEntrySchema', () => {
         op: 'PUT',
         table: 'projects',
         id: TASK_ID,
+        opData: validPutData,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts a labels PUT', () => {
+    expect(
+      crudEntrySchema.parse({
+        clientId: 1,
+        op: 'PUT',
+        table: 'labels',
+        id: LABEL_ID,
+        opData: validLabelPutData,
+      }),
+    ).toMatchObject({ op: 'PUT', table: 'labels', id: LABEL_ID });
+  });
+
+  it('accepts a labels PATCH that omits color and favorite', () => {
+    expect(
+      crudEntrySchema.parse({
+        clientId: 2,
+        op: 'PATCH',
+        table: 'labels',
+        id: LABEL_ID,
+        opData: { name: 'Renamed' },
+      }),
+    ).toMatchObject({ op: 'PATCH', table: 'labels', opData: { name: 'Renamed' } });
+  });
+
+  it('accepts a labels DELETE', () => {
+    expect(
+      crudEntrySchema.parse({
+        clientId: 3,
+        op: 'DELETE',
+        table: 'labels',
+        id: LABEL_ID,
+        opData: null,
+      }),
+    ).toMatchObject({ op: 'DELETE', table: 'labels' });
+  });
+
+  it('accepts a task_labels PUT', () => {
+    expect(
+      crudEntrySchema.parse({
+        clientId: 1,
+        op: 'PUT',
+        table: 'task_labels',
+        id: TASK_LABEL_ID,
+        opData: { task_id: TASK_ID, label_id: LABEL_ID, created_at: CREATED_AT },
+      }),
+    ).toMatchObject({ op: 'PUT', table: 'task_labels', id: TASK_LABEL_ID });
+  });
+
+  it('accepts a task_labels DELETE', () => {
+    expect(
+      crudEntrySchema.parse({
+        clientId: 2,
+        op: 'DELETE',
+        table: 'task_labels',
+        id: TASK_LABEL_ID,
+      }),
+    ).toMatchObject({ op: 'DELETE', table: 'task_labels' });
+  });
+
+  it('rejects a task_labels PATCH', () => {
+    expect(
+      crudEntrySchema.safeParse({
+        clientId: 2,
+        op: 'PATCH',
+        table: 'task_labels',
+        id: TASK_LABEL_ID,
+        opData: { task_id: TASK_ID },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a labels PUT with task columns', () => {
+    expect(
+      crudEntrySchema.safeParse({
+        clientId: 1,
+        op: 'PUT',
+        table: 'labels',
+        id: LABEL_ID,
         opData: validPutData,
       }).success,
     ).toBe(false);
