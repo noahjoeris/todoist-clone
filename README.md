@@ -40,7 +40,10 @@ View membership, ordering, and create defaults: [docs/task-views.md](docs/task-v
 
 This project is pre-release: schema changes replace the initial Drizzle migration in place.
 Reset local SQLite (reinstall / clear site data) and re-run `pnpm db:migrate` against a
-fresh or wiped Postgres when `public.tasks` changes; do not expect additive upgrades.
+fresh or wiped Postgres when `public.tasks`, `public.labels`, or `public.task_labels`
+change; do not expect additive upgrades. After stream or publication changes, redeploy
+`infra/powersync/sync-config.yaml` to PowerSync Cloud (or restart the local PowerSync
+service).
 
 ```sh
 pnpm install
@@ -58,12 +61,14 @@ Fill both env files. Two ways to provide the backing services:
    `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `EXPO_PUBLIC_POWERSYNC_URL`, `EXPO_PUBLIC_API_URL`);
    see [Authentication setup](#authentication-setup).
 2. Prepare the database for PowerSync (replication role + empty `powersync` publication),
-   then apply Drizzle migrations (creates `public.tasks` and adds it to the publication):
+   then apply Drizzle migrations (creates `public.tasks`, `public.labels`, and
+   `public.task_labels` and adds them to the publication):
    `psql "<direct connection string>" -v powersync_password='...' -f infra/powersync/bootstrap-source-db.sql`
    then `DATABASE_MIGRATION_URL="<direct connection string>" pnpm db:migrate`
 3. Create a PowerSync Cloud instance: connect it to the Supabase DB as `powersync_role`,
    enable **Use Supabase Auth**, and deploy the contents of `infra/powersync/sync-config.yaml`
-   (defines the `user_tasks` stream).
+   (defines the `user_tasks`, `user_labels`, and `user_task_labels` streams). Redeploy
+   that file whenever streams change.
 4. Put the instance URL in `EXPO_PUBLIC_POWERSYNC_URL` and the Fastify origin in
    `EXPO_PUBLIC_API_URL`. For web, set the API `CORS_ORIGIN` to the Expo origin
    (e.g. `http://localhost:8081`).
@@ -75,7 +80,7 @@ cd infra/supabase && cp .env.example .env && sh utils/generate-keys.sh && sh uti
 git checkout -- infra/supabase/docker-compose.yml   # overlay sets GOTRUE_JWT_KEYS; do not keep vendored edits
 pnpm infra:up                     # Supabase + PowerSync + API, waits for health checks
 pnpm infra:powersync:bootstrap    # replication role + publication in the Supabase DB
-pnpm db:migrate                   # creates public.tasks and adds it to the publication
+pnpm db:migrate                   # creates public.tasks/labels/task_labels and adds them to the publication
 ```
 
 Studio: http://localhost:8000 · API gateway: http://localhost:8000 · PowerSync: http://localhost:8080 · API: http://localhost:3000.

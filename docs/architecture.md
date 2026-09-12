@@ -373,6 +373,47 @@ Consequences:
 - **Drawer only.** Swipe-to-dismiss, Gesture Handler, task-row animations, and a
   general motion framework are follow-ups.
 
+### ADR-019 Normalized ID-based labels (server)
+
+Labels are first-class, account-owned rows (`public.labels`) with a many-to-many
+link table (`public.task_labels`). Rename and recolor follow the label id, not
+the name. Guest `local_tasks`, adoption, and the local-only schema do not
+acquire labels.
+
+- **Identity and uniqueness.** Clients generate UUID primary keys (ADR-006).
+  Display names are unique per user case-insensitively
+  (`UNIQUE (user_id, lower(name))`), trimmed, 1–60 characters. Color is one of
+  Todoist's 20 palette names (default `charcoal`) plus an `is_favorite` flag.
+  A duplicate-name unique violation is 400 `invalid-request` with a `name`
+  field issue — not automatic merging. Cross-device offline races that collide
+  on name reject the whole upload batch under the current connector policy
+  (400 → `complete()`, ADR-014).
+- **Associations.** `task_labels` uses a client-generated UUID `id` (PowerSync
+  single-id model) and `UNIQUE (task_id, label_id)`. Links support PUT/DELETE
+  only; PATCH is rejected at the contract. Before insert, the API locks both
+  the task and the label (`FOR UPDATE`) and requires both to belong to the
+  authenticated user. Missing or foreign refs are 403, never an unhandled FK
+  500. An existing association id belonging to another user is 403 — retries
+  must not re-own or retarget it. A second device attaching the same
+  task+label under a different link id is a 200 no-op (the association already
+  exists); unique-constraint 500s are not surfaced.
+- **Deletion.** `ON DELETE CASCADE` from `labels` and `tasks` (including
+  completed tasks) and from `auth.users`. Deleting a label removes it from
+  every task; deleting a task removes its links; deleting the user removes
+  both. A missing-link DELETE after a cascade is a no-op. Clients should
+  upload labels/tasks before new links, and local association deletes before
+  parent deletes; DB cascades cover the rest. Apply the batch in the given
+  order, one transaction (ADR-014).
+- **Sync and authorization.** RLS is enabled with no client policies (ADR-002).
+  Streams `user_labels` and `user_task_labels` filter `user_id = auth.user_id()`
+  (ADR-003). Both tables are in the `powersync` publication (ADR-005). The
+  client SQLite schema mirrors the tables (`is_favorite` as integer). The API
+  still owns authorization; UI → repositories → PowerSync remains the client
+  boundary. Client repositories and UI for labels are a follow-up.
+- **Wire.** Upload CRUD is discriminated by table and operation. SQLite
+  favorite 0/1 is normalized to boolean at the contract boundary, not by
+  truthy coercion. `user_id` and `updated_at` stay server-owned (ADR-014).
+
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,
