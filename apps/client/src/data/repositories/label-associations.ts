@@ -17,6 +17,20 @@ export function sameIdSet(left: readonly string[], right: readonly string[]): bo
 }
 
 /**
+ * Composer always sends the selection. The editor omits it when the selection
+ * still matches the open-editor baseline, so a title-only save does not attach
+ * or detach labels.
+ */
+export function labelIdsForSubmit(
+  selected: readonly string[],
+  baseline: readonly string[],
+  mode: 'always' | 'when-changed',
+): string[] | undefined {
+  if (mode === 'always' || !sameIdSet(selected, baseline)) return [...selected];
+  return undefined;
+}
+
+/**
  * Three-way merge for task↔label links.
  *
  * Attach anything the editor selected that is not on the task now.

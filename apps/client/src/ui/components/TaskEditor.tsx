@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import type { LabelRepository, Task, TaskInput } from '../../data/repositories';
 import { emptyTaskDraft, TaskForm, type TaskFormDraft } from './TaskForm';
+import { labelIdsFromTask } from './task-editor';
 
 interface TaskEditorProps {
   task: Task | null;
@@ -22,7 +24,8 @@ export function TaskEditor({
   registerDirtyCheck,
   labels,
 }: TaskEditorProps) {
-  const initialLabelIds = task?.labels.map((label) => label.id) ?? [];
+  // ADR-019: keep the open-editor baseline at mount; live sync must not replace it.
+  const initialLabelIds = useRef(labelIdsFromTask(task)).current;
   return (
     <TaskForm
       initial={task ? draftFromTask(task) : emptyTaskDraft}

@@ -46,6 +46,7 @@ function bindSqlite(
   execute: ReturnType<typeof vi.fn>,
   writeTransaction: ReturnType<typeof vi.fn>,
   getOptional: ReturnType<typeof vi.fn>,
+  getAll: ReturnType<typeof vi.fn>,
 ) {
   const runSql = async (sql: string, parameters: SQLInputValue[] = []) => {
     sqlite.prepare(sql).run(...parameters);
@@ -58,6 +59,7 @@ function bindSqlite(
 
   execute.mockImplementation(runSql);
   getOptional.mockImplementation(lookup);
+  getAll.mockImplementation(list);
   writeTransaction.mockImplementation(async (callback: (tx: Transaction) => Promise<unknown>) => {
     sqlite.exec('BEGIN');
     try {
@@ -96,8 +98,9 @@ describe('account-owned label repository', () => {
   const watch = vi.fn<CommonPowerSyncDatabase['watchWithCallback']>();
   const writeTransaction = vi.fn();
   const getOptional = vi.fn();
+  const getAll = vi.fn();
   const repositories = createLabelRepositories(
-    { watchWithCallback: watch, writeTransaction, getOptional },
+    { watchWithCallback: watch, writeTransaction, getOptional, getAll },
     randomUUID,
   );
 
@@ -106,7 +109,7 @@ describe('account-owned label repository', () => {
     directory = mkdtempSync(join(tmpdir(), 'todoist-labels-'));
     sqlite = new DatabaseSync(join(directory, 'labels.sqlite'));
     createAccountTables(sqlite);
-    bindSqlite(sqlite, execute, writeTransaction, getOptional);
+    bindSqlite(sqlite, execute, writeTransaction, getOptional, getAll);
     bindWatch(sqlite, watch);
   });
 
@@ -149,6 +152,23 @@ describe('account-owned label repository', () => {
     const found = await repositories.forUser(USER_A).findByName('WORK');
     expect(found).toMatchObject({ name: 'Work' });
     expect(await repositories.forUser(USER_A).findByName('Home')).toBeNull();
+  });
+
+  it('blocks unicode case variants that SQLite lower() would miss', async () => {
+    await repositories.forUser(USER_A).create({ name: 'École' });
+    await expect(repositories.forUser(USER_A).create({ name: 'école' })).rejects.toBeInstanceOf(
+      LabelDuplicateNameError,
+    );
+    expect(await repositories.forUser(USER_A).findByName('ÉCOLE')).toMatchObject({ name: 'École' });
+
+    const work = await repositories.forUser(USER_A).create({ name: 'Work' });
+    await expect(
+      repositories.forUser(USER_A).update(work.id, { name: 'école' }),
+    ).rejects.toBeInstanceOf(LabelDuplicateNameError);
+
+    await expect(repositories.forUser(USER_A).create({ name: 'ecole' })).resolves.toMatchObject({
+      name: 'ecole',
+    });
   });
 
   it('scopes reads, writes, and lookup to the owner', async () => {
@@ -254,6 +274,30 @@ describe('account-owned label repository', () => {
     ]);
     expect(await repositories.forUser(USER_A).countAffectedTasks(work.id)).toBe(2);
     expect(await repositories.forUser(USER_A).countAffectedTasks(home.id)).toBe(0);
+  });
+
+  it('counts distinct tasks when duplicate association rows exist', async () => {
+    const work = await repositories.forUser(USER_A).create({ name: 'Work' });
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, user_id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at, updated_at)
+         VALUES (?, ?, ?, '', 4, null, null, null, ?, ?)`,
+      )
+      .run('t-dup', USER_A, 'Shared', '2026-09-10T08:00:00.000Z', '2026-09-10T08:00:00.000Z');
+    sqlite
+      .prepare(
+        'INSERT INTO task_labels (id, user_id, task_id, label_id, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run('link-local', USER_A, 't-dup', work.id, '2026-09-10T08:00:00.000Z');
+    sqlite
+      .prepare(
+        'INSERT INTO task_labels (id, user_id, task_id, label_id, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run('link-synced', USER_A, 't-dup', work.id, '2026-09-10T08:01:00.000Z');
+
+    const items = listed() as Array<{ name: string; activeTaskCount: number }>;
+    expect(items).toEqual([expect.objectContaining({ name: 'Work', activeTaskCount: 1 })]);
+    expect(await repositories.forUser(USER_A).countAffectedTasks(work.id)).toBe(1);
   });
 
   it('deletes association rows with the label in one transaction', async () => {

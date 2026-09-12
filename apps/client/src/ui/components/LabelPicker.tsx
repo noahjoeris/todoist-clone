@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LabelDuplicateNameError, type LabelSummary } from '../../data/repositories';
 import { filterLabelsByQuery, inlineCreateName } from '../label-picker';
@@ -9,6 +9,8 @@ interface LabelPickerProps {
   selectedIds: readonly string[];
   onChange: (ids: string[]) => void;
   onCreate: (name: string) => Promise<{ id: string }>;
+  /** True from create start until the new id is selected, so the parent can block Save. */
+  onCreatingChange?: (creating: boolean) => void;
   disabled?: boolean;
 }
 
@@ -17,28 +19,38 @@ export function LabelPicker({
   selectedIds,
   onChange,
   onCreate,
+  onCreatingChange,
   disabled = false,
 }: LabelPickerProps) {
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
   const visible = filterLabelsByQuery([...labels], query);
   const createName = inlineCreateName(query, labels);
+  const interactionsDisabled = disabled || creating;
+
+  function setCreatePending(pending: boolean) {
+    setCreating(pending);
+    onCreatingChange?.(pending);
+  }
 
   function toggle(id: string) {
-    if (disabled) return;
+    if (interactionsDisabled) return;
     if (selected.has(id)) onChange(selectedIds.filter((item) => item !== id));
     else onChange([...selectedIds, id]);
   }
 
   async function create() {
     if (!createName || creating || disabled) return;
-    setCreating(true);
+    setCreatePending(true);
     setError(null);
     try {
       const created = await onCreate(createName);
-      onChange([...selectedIds, created.id]);
+      const current = selectedIdsRef.current;
+      if (!current.includes(created.id)) onChange([...current, created.id]);
       setQuery('');
     } catch (cause) {
       setError(
@@ -47,7 +59,7 @@ export function LabelPicker({
           : 'Couldn’t create that label. Try again.',
       );
     } finally {
-      setCreating(false);
+      setCreatePending(false);
     }
   }
 
@@ -62,7 +74,7 @@ export function LabelPicker({
           setQuery(value);
           setError(null);
         }}
-        editable={!disabled}
+        editable={!interactionsDisabled}
         style={styles.search}
       />
       <ScrollView accessibilityRole="list" style={styles.list} keyboardShouldPersistTaps="handled">
@@ -73,8 +85,8 @@ export function LabelPicker({
               key={label.id}
               accessibilityRole="checkbox"
               accessibilityLabel={label.name}
-              accessibilityState={{ checked: isSelected, disabled }}
-              disabled={disabled}
+              accessibilityState={{ checked: isSelected, disabled: interactionsDisabled }}
+              disabled={interactionsDisabled}
               onPress={() => toggle(label.id)}
               style={({ pressed }) => [styles.option, pressed && styles.pressed]}
             >
@@ -91,7 +103,7 @@ export function LabelPicker({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Create label ${createName}`}
-            disabled={disabled || creating}
+            disabled={interactionsDisabled}
             onPress={() => void create()}
             style={({ pressed }) => [styles.option, pressed && styles.pressed]}
           >

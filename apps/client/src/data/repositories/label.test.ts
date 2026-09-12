@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  foldLabelName,
   LabelDuplicateNameError,
   labelInputSchema,
+  labelNamesEqual,
   parseLabelColor,
   readSqliteFavorite,
   sortLabelsByName,
@@ -67,5 +69,12 @@ describe('label display conversion', () => {
     const error = new LabelDuplicateNameError();
     expect(error.code).toBe('duplicate-name');
     expect(error.message).toBe('A label with this name already exists');
+  });
+
+  it('compares names with a unicode-aware case fold', () => {
+    expect(foldLabelName('  École  ')).toBe('école');
+    expect(labelNamesEqual('École', 'école')).toBe(true);
+    expect(labelNamesEqual('École', 'ecole')).toBe(false);
+    expect(labelNamesEqual('Work', ' work ')).toBe(true);
   });
 });

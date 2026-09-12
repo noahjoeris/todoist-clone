@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { diffLabelAssociations, sameIdSet, uniqueIds } from './label-associations';
+import {
+  diffLabelAssociations,
+  labelIdsForSubmit,
+  sameIdSet,
+  uniqueIds,
+} from './label-associations';
 
 describe('label association merge', () => {
   it('deduplicates ids without reordering first occurrences', () => {
@@ -37,5 +42,16 @@ describe('label association merge', () => {
       attach: [],
       detach: [],
     });
+  });
+});
+
+describe('editor submit label payload', () => {
+  it('omits labels when the selection still matches the frozen baseline', () => {
+    expect(labelIdsForSubmit(['a'], ['a'], 'when-changed')).toBeUndefined();
+  });
+
+  it('sends the selection when the user changed labels or the composer always submits', () => {
+    expect(labelIdsForSubmit(['a', 'b'], ['a'], 'when-changed')).toEqual(['a', 'b']);
+    expect(labelIdsForSubmit(['a'], ['a'], 'always')).toEqual(['a']);
   });
 });

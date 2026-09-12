@@ -3,6 +3,7 @@ import { StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   type LabelListItem,
   type LabelRepository,
+  labelIdsForSubmit,
   sameIdSet,
   type TaskInput,
   TaskNotFoundError,
@@ -16,6 +17,7 @@ import { LabelChipRow } from './LabelChip';
 import { LabelPicker } from './LabelPicker';
 import { TaskDatePicker } from './TaskDatePicker';
 import { dateLabel, toCalendarDate } from './task-date';
+import { isTaskSubmitDisabled } from './task-form';
 
 export interface TaskFormDraft {
   title: string;
@@ -79,10 +81,18 @@ export function TaskForm({
   const [labelCatalog, setLabelCatalog] = useState<LabelListItem[]>([]);
   const [labelsReady, setLabelsReady] = useState(false);
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>(initialLabelIds);
+  const [creatingLabel, setCreatingLabel] = useState(false);
   const submitting = useRef(false);
+  const creatingLabelRef = useRef(false);
+  const baselineLabelIds = useRef(initialLabelIds).current;
   const busy = saving || deleting;
   const fieldsDisabled = busy || missing;
   const showLabels = labelsRepository != null;
+
+  function onLabelCreatingChange(pending: boolean) {
+    creatingLabelRef.current = pending;
+    setCreatingLabel(pending);
+  }
 
   useEffect(() => {
     if (!labelsRepository) return;
@@ -114,12 +124,12 @@ export function TaskForm({
       priority !== initial.priority ||
       date !== initial.date ||
       time !== initial.time ||
-      (showLabels && !sameIdSet(selectedLabelIds, initialLabelIds))
+      (showLabels && !sameIdSet(selectedLabelIds, baselineLabelIds))
     );
   }
 
   async function submit() {
-    if (submitting.current || missing) return;
+    if (submitting.current || missing || creatingLabelRef.current) return;
     const result = taskInputSchema.safeParse({
       title,
       description,
@@ -140,12 +150,9 @@ export function TaskForm({
     setError(null);
     setPanel(null);
     try {
-      const labelsChanged = showLabels && !sameIdSet(selectedLabelIds, initialLabelIds);
-      const labelIds = !showLabels
-        ? undefined
-        : submitLabels === 'always' || labelsChanged
-          ? selectedLabelIds
-          : undefined;
+      const labelIds = showLabels
+        ? labelIdsForSubmit(selectedLabelIds, baselineLabelIds, submitLabels)
+        : undefined;
       await onSubmit(result.data, labelIds);
       onClose();
     } catch (cause) {
@@ -282,7 +289,7 @@ export function TaskForm({
             label={saving ? '…' : submitLabel}
             accessibilityLabel={saving ? 'Saving task' : submitAccessibilityLabel}
             onPress={() => void submit()}
-            disabled={busy || missing || !title.trim()}
+            disabled={isTaskSubmitDisabled({ busy, missing, title, creatingLabel })}
             accent
           />
         </View>
@@ -320,6 +327,7 @@ export function TaskForm({
           selectedIds={selectedLabelIds}
           onChange={setSelectedLabelIds}
           onCreate={(name) => labelsRepository.create({ name })}
+          onCreatingChange={onLabelCreatingChange}
           disabled={fieldsDisabled}
         />
       )}

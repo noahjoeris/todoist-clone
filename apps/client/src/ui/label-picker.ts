@@ -1,18 +1,17 @@
-import type { LabelSummary } from '../data/repositories';
+import { foldLabelName, type LabelSummary, labelNamesEqual } from '../data/repositories';
 
 export function filterLabelsByQuery<T extends LabelSummary>(labels: T[], query: string): T[] {
-  const needle = query.trim().toLocaleLowerCase();
+  const needle = foldLabelName(query);
   if (needle === '') return labels;
-  return labels.filter((label) => label.name.toLocaleLowerCase().includes(needle));
+  return labels.filter((label) => foldLabelName(label.name).includes(needle));
 }
 
 export function hasExactName(
   labels: readonly Pick<LabelSummary, 'name'>[],
   query: string,
 ): boolean {
-  const needle = query.trim().toLocaleLowerCase();
-  if (needle === '') return false;
-  return labels.some((label) => label.name.toLocaleLowerCase() === needle);
+  if (foldLabelName(query) === '') return false;
+  return labels.some((label) => labelNamesEqual(label.name, query));
 }
 
 /** Inline create is offered when the trimmed query is a valid unused name. */

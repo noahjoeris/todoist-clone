@@ -27,4 +27,11 @@ describe('label picker search', () => {
   it('returns all labels when the query is blank', () => {
     expect(filterLabelsByQuery(labels, '  ')).toEqual(labels);
   });
+
+  it('treats accented names as case-insensitive matches', () => {
+    const catalog = [{ id: '1', name: 'École', color: 'charcoal' as const }];
+    expect(inlineCreateName('école', catalog)).toBeNull();
+    expect(inlineCreateName('ecole', catalog)).toBe('ecole');
+    expect(filterLabelsByQuery(catalog, 'ÉCO').map((label) => label.name)).toEqual(['École']);
+  });
 });

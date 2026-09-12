@@ -30,6 +30,7 @@ export {
   type GuestTaskAdoptionState,
 } from './guest-task-adoption';
 export {
+  foldLabelName,
   LABEL_COLORS,
   type LabelColor,
   LabelDuplicateNameError,
@@ -41,8 +42,9 @@ export {
   type LabelSummary,
   labelInputSchema,
   labelNameSchema,
+  labelNamesEqual,
 } from './label';
-export { sameIdSet } from './label-associations';
+export { labelIdsForSubmit, sameIdSet } from './label-associations';
 export {
   createLabelRepositories,
   createLabelRepository,

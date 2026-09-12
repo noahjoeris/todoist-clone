@@ -78,3 +78,12 @@ export function sortLabelsByName<T extends { name: string; id: string }>(labels:
     return byName !== 0 ? byName : left.id.localeCompare(right.id);
   });
 }
+
+/** Case-insensitive fold; SQLite `lower()` is ASCII-only (ADR-019). */
+export function foldLabelName(name: string): string {
+  return name.trim().toLocaleLowerCase();
+}
+
+export function labelNamesEqual(left: string, right: string): boolean {
+  return foldLabelName(left) === foldLabelName(right);
+}

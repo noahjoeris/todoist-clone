@@ -11,6 +11,7 @@ import {
   type LabelSummary,
   labelInputSchema,
   labelNameSchema,
+  labelNamesEqual,
   parseLabelColor,
   readSqliteFavorite,
 } from './label';
@@ -35,7 +36,7 @@ export interface LabelRepositories {
 
 type LabelDatabase = Pick<
   CommonPowerSyncDatabase,
-  'getOptional' | 'watchWithCallback' | 'writeTransaction'
+  'getAll' | 'getOptional' | 'watchWithCallback' | 'writeTransaction'
 >;
 
 type LabelRow = {
@@ -144,17 +145,13 @@ export function createLabelRepository(
     async findByName(name) {
       const trimmed = name.trim();
       if (trimmed === '') return null;
-      const row = await database.getOptional<LabelRow>(
-        `SELECT id, name, color FROM labels
-         WHERE user_id = ? AND lower(name) = lower(?)`,
-        [userId, trimmed],
-      );
+      const row = await findOwnedByName(database, userId, trimmed);
       return row ? mapSummary(row) : null;
     },
 
     async countAffectedTasks(id) {
       const row = await database.getOptional<{ count?: unknown }>(
-        `SELECT COUNT(*) AS count FROM task_labels WHERE label_id = ? AND user_id = ?`,
+        `SELECT COUNT(DISTINCT task_id) AS count FROM task_labels WHERE label_id = ? AND user_id = ?`,
         [id, userId],
       );
       return Number(row?.count ?? 0);
@@ -167,7 +164,7 @@ export function createLabelRepository(
             l.color,
             l.is_favorite AS isFavorite,
             l.created_at AS createdAt,
-            COALESCE(SUM(CASE WHEN t.id IS NOT NULL AND t.completed_at IS NULL THEN 1 ELSE 0 END), 0)
+            COUNT(DISTINCT CASE WHEN t.id IS NOT NULL AND t.completed_at IS NULL THEN t.id END)
               AS activeTaskCount
          FROM labels l
          LEFT JOIN task_labels tl ON tl.label_id = l.id AND tl.user_id = l.user_id
@@ -195,7 +192,11 @@ export function createLabelRepository(
   };
 }
 
-type LabelTx = {
+type LabelQuery = {
+  getAll: CommonPowerSyncDatabase['getAll'];
+};
+
+type LabelTx = LabelQuery & {
   getOptional: CommonPowerSyncDatabase['getOptional'];
   execute: CommonPowerSyncDatabase['execute'];
 };
@@ -206,13 +207,23 @@ async function assertNameAvailable(
   name: string,
   exceptId?: string,
 ): Promise<void> {
-  const row = await tx.getOptional<{ id: string }>(
-    exceptId === undefined
-      ? `SELECT id FROM labels WHERE user_id = ? AND lower(name) = lower(?)`
-      : `SELECT id FROM labels WHERE user_id = ? AND lower(name) = lower(?) AND id != ?`,
-    exceptId === undefined ? [userId, name] : [userId, name, exceptId],
-  );
+  const row = await findOwnedByName(tx, userId, name, exceptId);
   if (row) throw new LabelDuplicateNameError();
+}
+
+async function findOwnedByName(
+  query: LabelQuery,
+  userId: string,
+  name: string,
+  exceptId?: string,
+): Promise<LabelRow | null> {
+  const rows = await query.getAll<LabelRow>(
+    exceptId === undefined
+      ? `SELECT id, name, color FROM labels WHERE user_id = ?`
+      : `SELECT id, name, color FROM labels WHERE user_id = ? AND id != ?`,
+    exceptId === undefined ? [userId] : [userId, exceptId],
+  );
+  return rows.find((row) => labelNamesEqual(row.name, name)) ?? null;
 }
 
 async function readOwnedLabel(
