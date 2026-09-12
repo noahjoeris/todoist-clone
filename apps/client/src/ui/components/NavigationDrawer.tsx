@@ -41,7 +41,9 @@ export function NavigationDrawer({
   restoreFocus,
   children,
 }: NavigationDrawerProps) {
-  const progress = useSharedValue(presence.open ? 1 : 0);
+  // Always start closed: host mounts with presence.open already true, so seeding
+  // progress at 1 would skip the open slide/backdrop (AC9).
+  const progress = useSharedValue(0);
   const [drawerWidth, setDrawerWidth] = useState(SIDEBAR_WIDTH);
   const reducedMotion = usePrefersReducedMotion();
   const hiddenDirection = I18nManager.isRTL ? 1 : -1;

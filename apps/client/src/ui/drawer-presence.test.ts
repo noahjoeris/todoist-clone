@@ -29,6 +29,15 @@ describe('drawer presence', () => {
     expect(state).toMatchObject({ open: false, visible: false, generation: 2 });
   });
 
+  it('opens with visible+open together so a remounted host must animate from closed', () => {
+    // AppShell mounts NavigationDrawer when presence.visible; requestDrawerOpen
+    // sets both flags. Seeding Reanimated progress from presence.open would skip
+    // the entrance animation — the drawer host must start progress at 0.
+    const state = requestDrawerOpen(closedDrawer);
+    expect(state.open).toBe(true);
+    expect(state.visible).toBe(true);
+  });
+
   it('releases the host immediately on breakpoint or identity reset and ignores the stale close', () => {
     let state = requestDrawerOpen(closedDrawer);
     state = requestDrawerClose(state);
