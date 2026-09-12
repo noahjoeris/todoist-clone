@@ -15,7 +15,7 @@ services:
     image: todoist-clone-api
     restart: unless-stopped
     ports:
-      - '${API_PORT:-3000}:3000'
+      - '${API_HOST_PORT:-3000}:3000'
     environment:
       NODE_ENV: production
       PORT: 3000
