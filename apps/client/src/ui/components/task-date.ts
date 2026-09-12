@@ -4,6 +4,27 @@ export function toCalendarDate(date: Date): string {
     .padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
 }
 
+/** Local calendar arithmetic. Do not add a fixed 24-hour millisecond duration. */
+export function addCalendarDays(date: string, amount: number): string {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  const day = Number(date.slice(8, 10));
+  return toCalendarDate(new Date(year, month - 1, day + amount));
+}
+
+export function upcomingBounds(
+  today: string,
+  dayCount: number,
+): { startInclusive: string; endExclusive: string } {
+  const startInclusive = addCalendarDays(today, 1);
+  return { startInclusive, endExclusive: addCalendarDays(startInclusive, dayCount) };
+}
+
+export function millisecondsUntilLocalMidnight(now: Date): number {
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return Math.max(1, nextMidnight.getTime() - now.getTime());
+}
+
 export function dateLabel(date: string, now = new Date()): string {
   if (date === toCalendarDate(now)) return 'Today';
   const tomorrow = new Date(now);
