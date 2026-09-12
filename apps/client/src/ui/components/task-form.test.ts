@@ -17,4 +17,10 @@ describe('task form submit gating', () => {
     expect(isTaskSubmitDisabled({ ...ready, missing: true })).toBe(true);
     expect(isTaskSubmitDisabled({ ...ready, title: '  ' })).toBe(true);
   });
+
+  it('blocks save while the project catalog is loading or the selection is gone', () => {
+    expect(isTaskSubmitDisabled({ ...ready, projectsReady: false })).toBe(true);
+    expect(isTaskSubmitDisabled({ ...ready, projectSelectionInvalid: true })).toBe(true);
+    expect(isTaskSubmitDisabled({ ...ready, projectsReady: true })).toBe(false);
+  });
 });

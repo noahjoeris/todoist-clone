@@ -7,9 +7,11 @@ import {
   createAuthRepository,
   createGuestTaskAdoptionRepository,
   createLabelRepositories,
+  createProjectRepositories,
   createTaskRepositories,
   type GuestTaskAdoptionRepository,
   type LabelRepositories,
+  type ProjectRepositories,
   type SyncStatusSource,
   type TaskRepositories,
 } from './repositories';
@@ -37,6 +39,7 @@ export interface DataSystem {
   powersync: CommonPowerSyncDatabase;
   tasks: TaskRepositories;
   labels: LabelRepositories;
+  projects: ProjectRepositories;
   guestTaskAdoption: GuestTaskAdoptionRepository;
   auth: AuthAvailability;
   sync?: SyncStatusSource;
@@ -56,12 +59,14 @@ export function createDataSystem(): DataSystem {
   const powersync = createPowerSyncDatabase();
   const tasks = createTaskRepositories(powersync, randomUUID);
   const labels = createLabelRepositories(powersync, randomUUID);
+  const projects = createProjectRepositories(powersync, randomUUID);
   const guestTaskAdoption = createGuestTaskAdoptionRepository(powersync);
   const cloud = createCloudServices(powersync, guestTaskAdoption);
   return {
     powersync,
     tasks,
     labels,
+    projects,
     guestTaskAdoption,
     auth: cloud.auth,
     ...(cloud.sync ? { sync: cloud.sync } : {}),

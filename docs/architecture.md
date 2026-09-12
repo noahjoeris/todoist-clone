@@ -476,8 +476,9 @@ Runbook, secret names, and smoke checklist: README "Preview / QA".
 
 Account tasks need a primary container independent of labels (#16 / #17). Projects are
 flat, personal, account-owned rows (`public.projects`) with nullable membership on
-`tasks.project_id`. The companion client enhancement is #29; this ADR is extended
-there with repository and UI details rather than split into a second decision.
+`tasks.project_id`. Server contract, schema, and streams are #28; this ADR is
+extended here with repository and UI details rather than split into a second
+decision.
 
 - **Inbox is null, not a project.** Todoist gives every task a `project_id`, including
   a special Inbox project (`is_inbox_project` / `user.inbox_project_id`). This clone
@@ -530,6 +531,33 @@ there with repository and UI details rather than split into a second decision.
 - **Existing features.** Task lifecycle/views (#13 / #14) and labels (#16 / #17)
   stay as they are. Sections, nested projects, sharing, and guest projects are
   deferred.
+- **Client repository.** Account-only `ProjectRepository` (no guest table). UI
+  imports repository interfaces and domain types only. Names are validated in
+  the local write using a Unicode-aware fold (SQLite `lower()` is ASCII-only);
+  the server unique index remains authoritative across devices. Create appends
+  after the highest stored `sort_order` (compacting if that would exceed the
+  32-bit bound). Reorder receives the full active-id sequence, rejects
+  duplicates/foreign/stale sets, then writes dense 0-based positions onto the
+  full owned list so archived slots stay put. Favorites inherit that order.
+  Concurrent equal positions resolve by `id`. Local delete clears owned task
+  memberships (including completed) and bumps `updated_at` in the same
+  transaction — SQLite/PowerSync views do not run `ON DELETE SET NULL`. If
+  task-clears + the project DELETE would exceed the 2000-operation upload
+  envelope, the write fails before mutation and the UI offers archive.
+- **Editor baseline.** Task membership is a single value. The editor captures
+  `projectId` at open and sends it only when the user’s final selection
+  differs from that baseline, so a title-only save cannot undo a remote move.
+  Omitted update membership leaves the stored FK unchanged; explicit null is
+  Inbox. A missing/deleted selection is a field error and is not enqueued.
+  Undo restores the same project id only if that owned row still exists
+  (archived is allowed); otherwise the task returns to Inbox. Projects are
+  never recreated from Undo.
+- **Guest isolation.** Guests never receive a project repository, picker,
+  sidebar, or markers. `local_tasks` has no `project_id`; adoption inserts
+  account Inbox rows. Guest Inbox SQL does not mention `project_id`.
+- **Ordering/conflict policy.** This client does not claim strict global
+  list-order conflict resolution. Duplicate-name races across offline devices
+  still discard the whole upload batch (400 → `complete()`, ADR-014 / ADR-019).
 
 ## Deferred
 

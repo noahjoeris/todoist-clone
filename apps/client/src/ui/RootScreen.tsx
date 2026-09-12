@@ -4,6 +4,7 @@ import {
   type AuthRepository,
   type GuestTaskAdoptionRepository,
   type LabelRepositories,
+  type ProjectRepositories,
   type SyncStatusSource,
   type TaskRepositories,
   type TaskRepository,
@@ -53,6 +54,7 @@ export function RootScreen({ system }: { system: DataSystem }) {
         <AccountAwareScreen
           tasks={system.tasks}
           labels={system.labels}
+          projects={system.projects}
           auth={system.auth.repository}
           sync={sync}
           guestTaskAdoption={system.guestTaskAdoption}
@@ -74,12 +76,14 @@ type AuthScreen =
 function AccountAwareScreen({
   tasks,
   labels,
+  projects,
   auth,
   sync,
   guestTaskAdoption,
 }: {
   tasks: TaskRepositories;
   labels: LabelRepositories;
+  projects: ProjectRepositories;
   auth: AuthRepository;
   sync: SyncStatusSource;
   guestTaskAdoption: GuestTaskAdoptionRepository;
@@ -98,6 +102,10 @@ function AccountAwareScreen({
   const userLabels = useMemo(
     () => (signedInUserId == null ? null : labels.forUser(signedInUserId)),
     [labels, signedInUserId],
+  );
+  const userProjects = useMemo(
+    () => (signedInUserId == null ? null : projects.forUser(signedInUserId)),
+    [projects, signedInUserId],
   );
 
   useEffect(() => {
@@ -187,6 +195,7 @@ function AccountAwareScreen({
           }}
           sync={sync}
           {...(userLabels ? { labels: userLabels } : {})}
+          {...(userProjects ? { projects: userProjects } : {})}
         />
       );
     case 'signed-out':

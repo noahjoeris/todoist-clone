@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { taskInputSchema } from './task';
+import { projectIdForSubmit, taskInputSchema } from './task';
 
 describe('task input', () => {
   it('normalizes a title-only task and supplies defaults', () => {
@@ -49,5 +49,18 @@ describe('task input', () => {
     { scheduledDate: '2026-09-09', scheduledTime: '9:30' },
   ])('rejects invalid input %j', (input) => {
     expect(taskInputSchema.safeParse({ title: 'Plan', ...input }).success).toBe(false);
+  });
+});
+
+describe('project membership submit', () => {
+  it('always sends the composer selection, including Inbox', () => {
+    expect(projectIdForSubmit(null, null, 'always')).toBeNull();
+    expect(projectIdForSubmit('p1', null, 'always')).toBe('p1');
+  });
+
+  it('omits an untouched editor selection so a remote move survives a title-only save', () => {
+    expect(projectIdForSubmit('p1', 'p1', 'when-changed')).toBeUndefined();
+    expect(projectIdForSubmit(null, 'p1', 'when-changed')).toBeNull();
+    expect(projectIdForSubmit('p2', 'p1', 'when-changed')).toBe('p2');
   });
 });

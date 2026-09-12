@@ -51,13 +51,40 @@ export {
   type LabelRepositories,
   type LabelRepository,
 } from './label-repository';
+export {
+  activeProjects,
+  archivedProjects,
+  favoriteProjects,
+  foldProjectName,
+  MAX_UPLOAD_OPERATIONS,
+  ProjectDuplicateNameError,
+  type ProjectFields,
+  type ProjectInput,
+  type ProjectListItem,
+  ProjectNotFoundError,
+  ProjectOperationTooLargeError,
+  type ProjectPatch,
+  ProjectStaleListError,
+  type ProjectSummary,
+  projectInputSchema,
+  projectNameSchema,
+  projectNamesEqual,
+} from './project';
+export {
+  createProjectRepositories,
+  createProjectRepository,
+  type ProjectRepositories,
+  type ProjectRepository,
+} from './project-repository';
 export type { ClientSyncStatus, SyncStatusSource } from './sync';
 export {
+  projectIdForSubmit,
   type Task,
   type TaskInput,
   type TaskLabelEdit,
   TaskNotFoundError,
   type TaskPriority,
+  type TaskProjectEdit,
   TaskRestoreConflictError,
   taskInputSchema,
 } from './task';

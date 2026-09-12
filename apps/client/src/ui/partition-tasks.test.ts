@@ -11,6 +11,8 @@ function task(overrides: Partial<Task> & Pick<Task, 'id' | 'title'>): Task {
     completedAt: null,
     createdAt: '2026-09-10T08:00:00.000Z',
     labels: [],
+    projectId: null,
+    project: null,
     ...overrides,
   };
 }

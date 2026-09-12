@@ -4,6 +4,10 @@ import {
   type LabelListItem,
   type LabelRepository,
   labelIdsForSubmit,
+  type ProjectListItem,
+  ProjectNotFoundError,
+  type ProjectRepository,
+  projectIdForSubmit,
   sameIdSet,
   type TaskInput,
   TaskNotFoundError,
@@ -11,10 +15,12 @@ import {
   taskInputSchema,
 } from '../../data/repositories';
 import { confirmDiscard } from '../discard-draft';
+import { isProjectSelectionValid } from '../project-picker';
 import { colors, priorityColors } from '../theme';
 import { ActionButton } from './ActionButton';
 import { LabelChipRow } from './LabelChip';
 import { LabelPicker } from './LabelPicker';
+import { ProjectPicker } from './ProjectPicker';
 import { TaskDatePicker } from './TaskDatePicker';
 import { dateLabel, toCalendarDate } from './task-date';
 import { isTaskSubmitDisabled } from './task-form';
@@ -37,7 +43,7 @@ export const emptyTaskDraft: TaskFormDraft = {
 
 interface TaskFormProps {
   initial: TaskFormDraft;
-  onSubmit: (input: TaskInput, labelIds?: string[]) => Promise<void>;
+  onSubmit: (input: TaskInput, labelIds?: string[], projectId?: string | null) => Promise<void>;
   onClose: () => void;
   submitLabel: string;
   submitAccessibilityLabel: string;
@@ -51,6 +57,9 @@ interface TaskFormProps {
   initialLabelIds?: string[];
   /** Composer always sends the selection; the editor omits it when unchanged. */
   submitLabels?: 'always' | 'when-changed';
+  projects?: ProjectRepository;
+  initialProjectId?: string | null;
+  submitProject?: 'always' | 'when-changed';
 }
 
 export function TaskForm({
@@ -68,13 +77,16 @@ export function TaskForm({
   labels: labelsRepository,
   initialLabelIds = [],
   submitLabels = 'when-changed',
+  projects: projectsRepository,
+  initialProjectId = null,
+  submitProject = 'when-changed',
 }: TaskFormProps) {
   const [title, setTitle] = useState(initial.title);
   const [description, setDescription] = useState(initial.description);
   const [priority, setPriority] = useState<TaskPriority>(initial.priority);
   const [date, setDate] = useState<string | null>(initial.date);
   const [time, setTime] = useState(initial.time);
-  const [panel, setPanel] = useState<'date' | 'priority' | 'labels' | null>(null);
+  const [panel, setPanel] = useState<'date' | 'priority' | 'labels' | 'project' | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,12 +94,24 @@ export function TaskForm({
   const [labelsReady, setLabelsReady] = useState(false);
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>(initialLabelIds);
   const [creatingLabel, setCreatingLabel] = useState(false);
+  const [projectCatalog, setProjectCatalog] = useState<ProjectListItem[]>([]);
+  const [projectsReady, setProjectsReady] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(initialProjectId);
   const submitting = useRef(false);
   const creatingLabelRef = useRef(false);
   const baselineLabelIds = useRef(initialLabelIds).current;
+  const baselineProjectId = useRef(initialProjectId).current;
   const busy = saving || deleting;
   const fieldsDisabled = busy || missing;
   const showLabels = labelsRepository != null;
+  const showProjects = projectsRepository != null;
+  const projectSelectionValid = !showProjects
+    ? true
+    : isProjectSelectionValid(selectedProjectId, projectCatalog, projectsReady);
+  const selectedProject =
+    selectedProjectId == null
+      ? null
+      : (projectCatalog.find((project) => project.id === selectedProjectId) ?? null);
 
   function onLabelCreatingChange(pending: boolean) {
     creatingLabelRef.current = pending;
@@ -107,6 +131,20 @@ export function TaskForm({
   }, [labelsRepository]);
 
   useEffect(() => {
+    if (!projectsRepository) return;
+    setProjectsReady(false);
+    return projectsRepository.subscribe(
+      (items) => {
+        setProjectCatalog(items);
+        setProjectsReady(true);
+      },
+      () => {
+        setProjectsReady(true);
+      },
+    );
+  }, [projectsRepository]);
+
+  useEffect(() => {
     if (!showLabels || !labelsReady) return;
     const available = new Set(labelCatalog.map((label) => label.id));
     setSelectedLabelIds((current) => {
@@ -124,12 +162,13 @@ export function TaskForm({
       priority !== initial.priority ||
       date !== initial.date ||
       time !== initial.time ||
-      (showLabels && !sameIdSet(selectedLabelIds, baselineLabelIds))
+      (showLabels && !sameIdSet(selectedLabelIds, baselineLabelIds)) ||
+      (showProjects && selectedProjectId !== baselineProjectId)
     );
   }
 
   async function submit() {
-    if (submitting.current || missing || creatingLabelRef.current) return;
+    if (submitting.current || missing || creatingLabelRef.current || !projectSelectionValid) return;
     const result = taskInputSchema.safeParse({
       title,
       description,
@@ -153,13 +192,18 @@ export function TaskForm({
       const labelIds = showLabels
         ? labelIdsForSubmit(selectedLabelIds, baselineLabelIds, submitLabels)
         : undefined;
-      await onSubmit(result.data, labelIds);
+      const projectId = showProjects
+        ? projectIdForSubmit(selectedProjectId, baselineProjectId, submitProject)
+        : undefined;
+      await onSubmit(result.data, labelIds, projectId);
       onClose();
     } catch (cause) {
       setError(
         cause instanceof TaskNotFoundError
           ? 'This task is no longer available.'
-          : 'Couldn’t save your task. Your draft is here—try again.',
+          : cause instanceof ProjectNotFoundError
+            ? 'This project is no longer available. Choose Inbox or another project.'
+            : 'Couldn’t save your task. Your draft is here—try again.',
       );
     } finally {
       submitting.current = false;
@@ -268,6 +312,22 @@ export function TaskForm({
               onPress={() => setPanel(panel === 'labels' ? null : 'labels')}
             />
           )}
+          {showProjects && (
+            <ActionButton
+              label={
+                selectedProject
+                  ? `${selectedProject.name}${selectedProject.isArchived ? ' · Archived' : ''}`
+                  : selectedProjectId
+                    ? 'Unavailable project'
+                    : 'Inbox'
+              }
+              accessibilityLabel="Choose project"
+              color={selectedProjectId ? colors.accent : colors.muted}
+              disabled={fieldsDisabled}
+              selected={panel === 'project'}
+              onPress={() => setPanel(panel === 'project' ? null : 'project')}
+            />
+          )}
         </View>
         <View style={styles.actions}>
           {onDelete && (
@@ -289,7 +349,15 @@ export function TaskForm({
             label={saving ? '…' : submitLabel}
             accessibilityLabel={saving ? 'Saving task' : submitAccessibilityLabel}
             onPress={() => void submit()}
-            disabled={isTaskSubmitDisabled({ busy, missing, title, creatingLabel })}
+            disabled={isTaskSubmitDisabled({
+              busy,
+              missing,
+              title,
+              creatingLabel,
+              ...(showProjects
+                ? { projectsReady, projectSelectionInvalid: !projectSelectionValid }
+                : {}),
+            })}
             accent
           />
         </View>
@@ -330,6 +398,19 @@ export function TaskForm({
           onCreatingChange={onLabelCreatingChange}
           disabled={fieldsDisabled}
         />
+      )}
+      {panel === 'project' && showProjects && !fieldsDisabled && (
+        <ProjectPicker
+          projects={projectCatalog}
+          selectedId={selectedProjectId}
+          onChange={setSelectedProjectId}
+          disabled={fieldsDisabled}
+        />
+      )}
+      {showProjects && !projectSelectionValid && projectsReady && (
+        <Text accessibilityRole="alert" style={styles.error}>
+          This project is no longer available. Choose Inbox or another project.
+        </Text>
       )}
       {showLabels && selectedLabelIds.length > 0 && panel !== 'labels' && (
         <LabelChipRow

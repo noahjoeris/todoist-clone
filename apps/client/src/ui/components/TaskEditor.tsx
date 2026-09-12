@@ -1,17 +1,18 @@
 import { useRef } from 'react';
-import type { LabelRepository, Task, TaskInput } from '../../data/repositories';
+import type { LabelRepository, ProjectRepository, Task, TaskInput } from '../../data/repositories';
 import { emptyTaskDraft, TaskForm, type TaskFormDraft } from './TaskForm';
-import { labelIdsFromTask } from './task-editor';
+import { labelIdsFromTask, projectIdFromTask } from './task-editor';
 
 interface TaskEditorProps {
   task: Task | null;
   missing: boolean;
-  onSave: (input: TaskInput, labelIds?: string[]) => Promise<void>;
+  onSave: (input: TaskInput, labelIds?: string[], projectId?: string | null) => Promise<void>;
   onDelete: () => Promise<void>;
   onClose: () => void;
   today?: string;
   registerDirtyCheck?: (isDirty: () => boolean) => () => void;
   labels?: LabelRepository;
+  projects?: ProjectRepository;
 }
 
 export function TaskEditor({
@@ -23,9 +24,11 @@ export function TaskEditor({
   today,
   registerDirtyCheck,
   labels,
+  projects,
 }: TaskEditorProps) {
   // ADR-019: keep the open-editor baseline at mount; live sync must not replace it.
   const initialLabelIds = useRef(labelIdsFromTask(task)).current;
+  const initialProjectId = useRef(projectIdFromTask(task)).current;
   return (
     <TaskForm
       initial={task ? draftFromTask(task) : emptyTaskDraft}
@@ -38,9 +41,11 @@ export function TaskEditor({
       cancelAccessibilityLabel="Cancel editing"
       autoFocus={!missing}
       submitLabels="when-changed"
+      submitProject="when-changed"
       {...(today !== undefined ? { today } : {})}
       {...(registerDirtyCheck ? { registerDirtyCheck } : {})}
       {...(labels ? { labels, initialLabelIds } : {})}
+      {...(projects ? { projects, initialProjectId } : {})}
     />
   );
 }

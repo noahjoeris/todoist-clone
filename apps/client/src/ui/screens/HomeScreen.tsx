@@ -21,6 +21,8 @@ import {
 import {
   type LabelListItem,
   type LabelRepository,
+  type ProjectListItem,
+  type ProjectRepository,
   type SyncStatusSource,
   type Task,
   type TaskActiveCounts,
@@ -38,6 +40,7 @@ import { TaskEditor } from '../components/TaskEditor';
 import { TaskList, type TaskSection } from '../components/TaskList';
 import { TaskRow } from '../components/TaskRow';
 import { dateLabel, upcomingBounds } from '../components/task-date';
+import { resolveOpenEditorTask } from '../components/task-editor';
 import { UndoBanner } from '../components/UndoBanner';
 import { confirmDiscard } from '../discard-draft';
 import {
@@ -48,13 +51,26 @@ import {
   requestDrawerClose,
   requestDrawerOpen,
 } from '../drawer-presence';
-import { type HomePane, isSamePane, taskDestinationOf } from '../home-pane';
+import {
+  type HomePane,
+  isSamePane,
+  isTaskListPane,
+  taskDestinationOf,
+  viewedProjectIsMissing,
+} from '../home-pane';
 import { useCalendarToday } from '../hooks/useCalendarToday';
 import { useSyncStatus } from '../hooks/useSyncStatus';
+import { confirmLeaveDeletedProject } from '../leave-deleted-project';
+import {
+  defaultComposerLabelIds,
+  defaultComposerProjectId,
+  taskComposerInstanceKey,
+} from '../task-create-defaults';
 import { createTaskUndoController } from '../task-undo';
 import { groupTasksByScheduledDate, rescheduleInput, splitTodayGroups } from '../task-view-groups';
 import { colors } from '../theme';
 import { LabelsScreen } from './LabelsScreen';
+import { ProjectsScreen } from './ProjectsScreen';
 
 export type { AccountEntry };
 
@@ -74,6 +90,7 @@ interface HomeScreenProps {
   banner?: ReactNode;
   sync?: SyncStatusSource;
   labels?: LabelRepository;
+  projects?: ProjectRepository;
 }
 
 const SYNC_LABEL: Record<NonNullable<ReturnType<typeof useSyncStatus>>, string> = {
@@ -83,7 +100,7 @@ const SYNC_LABEL: Record<NonNullable<ReturnType<typeof useSyncStatus>>, string> 
 };
 
 const EMPTY_COPY: Record<
-  'inbox' | 'today' | 'upcoming' | 'label',
+  'inbox' | 'today' | 'upcoming' | 'label' | 'project',
   { title: string; text: string }
 > = {
   inbox: {
@@ -102,6 +119,10 @@ const EMPTY_COPY: Record<
     title: 'No tasks with this label.',
     text: 'Add a task and it will include this label.',
   },
+  project: {
+    title: 'No tasks in this project.',
+    text: 'Add a task and it will live here. Inbox is for tasks without a project.',
+  },
 };
 
 export function HomeScreen({
@@ -114,6 +135,7 @@ export function HomeScreen({
   banner,
   sync,
   labels,
+  projects,
 }: HomeScreenProps) {
   const today = useCalendarToday();
   const { width } = useWindowDimensions();
@@ -127,6 +149,9 @@ export function HomeScreen({
   const [completed, setCompleted] = useState<Task[]>([]);
   const [labelItems, setLabelItems] = useState<LabelListItem[]>([]);
   const [labelsReady, setLabelsReady] = useState(false);
+  const [projectItems, setProjectItems] = useState<ProjectListItem[]>([]);
+  const [projectsReady, setProjectsReady] = useState(false);
+  const [addingProject, setAddingProject] = useState(false);
   const [counts, setCounts] = useState<TaskActiveCounts>({ inbox: 0, today: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -134,6 +159,11 @@ export function HomeScreen({
   const [composer, setComposer] = useState<Composer>({ kind: 'closed' });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingBaseline, setEditingBaseline] = useState<string[]>([]);
+  const [watchedEditing, setWatchedEditing] = useState<{ id: string; task: Task | null } | null>(
+    null,
+  );
+  const heldEditingTaskRef = useRef<Task | null>(null);
+  const deletedProjectPromptRef = useRef<string | null>(null);
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -150,6 +180,7 @@ export function HomeScreen({
 
   const destination = taskDestinationOf(pane);
   const viewingLabel = pane.type === 'label' ? pane.labelId : null;
+  const viewingProject = pane.type === 'project' ? pane.projectId : null;
   const activeQuery = useMemo(
     () => viewQuery(pane, today, upcoming, 'active'),
     [pane, today, upcoming],
@@ -164,6 +195,9 @@ export function HomeScreen({
   );
   const currentLabel = viewingLabel
     ? (labelItems.find((label) => label.id === viewingLabel) ?? null)
+    : null;
+  const currentProject = viewingProject
+    ? (projectItems.find((project) => project.id === viewingProject) ?? null)
     : null;
 
   useEffect(() => () => undo.dismiss(), [undo]);
@@ -256,6 +290,38 @@ export function HomeScreen({
     }
   }, [pane, labelsReady, labelItems, onPaneChange]);
 
+  useEffect(() => {
+    if (!projects) {
+      setProjectItems([]);
+      setProjectsReady(false);
+      return;
+    }
+    setProjectsReady(false);
+    return projects.subscribe(
+      (items) => {
+        setProjectItems(items);
+        setProjectsReady(true);
+      },
+      () => {
+        setProjectsReady(true);
+      },
+    );
+  }, [projects]);
+
+  useEffect(() => {
+    if (editingId == null) {
+      setWatchedEditing(null);
+      heldEditingTaskRef.current = null;
+      return;
+    }
+    const id = editingId;
+    return repository.subscribeById(
+      id,
+      (task) => setWatchedEditing({ id, task }),
+      () => setWatchedEditing({ id, task: null }),
+    );
+  }, [repository, editingId]);
+
   const registerDirtyCheck = useCallback((isDirty: () => boolean) => {
     dirtyCheckRef.current = isDirty;
     return () => {
@@ -271,12 +337,32 @@ export function HomeScreen({
     setPresence((state) => finishDrawerClose(state, generation));
   }, []);
 
-  function closeForms() {
+  const closeForms = useCallback(() => {
     setComposer({ kind: 'closed' });
     setEditingId(null);
     setEditingBaseline([]);
     setReschedulingId(null);
-  }
+    heldEditingTaskRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    const projectIds = projectItems.map((project) => project.id);
+    if (!viewedProjectIsMissing(pane, projectsReady, projectIds)) {
+      deletedProjectPromptRef.current = null;
+      return;
+    }
+    if (pane.type !== 'project') return;
+    if (deletedProjectPromptRef.current === pane.projectId) return;
+    deletedProjectPromptRef.current = pane.projectId;
+    void confirmLeaveDeletedProject({
+      isDirty: dirtyCheckRef.current(),
+      confirmDiscard,
+    }).then((decision) => {
+      if (decision === 'stay') return;
+      closeForms();
+      onPaneChange({ type: 'inbox' });
+    });
+  }, [pane, projectsReady, projectItems, onPaneChange, closeForms]);
 
   async function confirmLeave() {
     if (dirtyCheckRef.current()) {
@@ -302,20 +388,17 @@ export function HomeScreen({
 
   async function openTask(task: Task) {
     if (!(await confirmLeave())) return;
+    heldEditingTaskRef.current = task;
     setEditingId(task.id);
     setEditingBaseline(task.labels.map((label) => label.id));
   }
 
-  async function saveEdit(input: TaskInput, labelIds?: string[]) {
+  async function saveEdit(input: TaskInput, labelIds?: string[], projectId?: string | null) {
     if (editingId == null) return;
-    if (labelIds === undefined) {
-      await repository.update(editingId, input);
-      return;
-    }
-    await repository.update(editingId, input, {
-      labelIds,
-      baselineLabelIds: editingBaseline,
-    });
+    const labelEdit =
+      labelIds === undefined ? undefined : { labelIds, baselineLabelIds: editingBaseline };
+    const projectEdit = projectId === undefined ? undefined : { projectId };
+    await repository.update(editingId, input, labelEdit, projectEdit);
   }
 
   async function deleteEditing() {
@@ -346,6 +429,7 @@ export function HomeScreen({
     if (!isSamePane(pane, next)) {
       if (!(await confirmLeave())) return;
       setCompletedExpanded(false);
+      if (next.type !== 'projects') setAddingProject(false);
       onPaneChange(next);
     }
     setPresence(requestDrawerClose);
@@ -353,8 +437,15 @@ export function HomeScreen({
 
   async function addFromSidebar() {
     if (!(await confirmLeave())) return;
-    if (pane.type === 'labels') onPaneChange({ type: 'inbox' });
+    if (pane.type === 'labels' || pane.type === 'projects') onPaneChange({ type: 'inbox' });
     setComposer({ kind: 'global' });
+    setPresence(requestDrawerClose);
+  }
+
+  async function addProjectFromSidebar() {
+    if (!(await confirmLeave())) return;
+    setAddingProject(true);
+    onPaneChange({ type: 'projects' });
     setPresence(requestDrawerClose);
   }
 
@@ -369,20 +460,38 @@ export function HomeScreen({
   }
 
   const wrappedAccount = wrapAccount(account, confirmLeave);
-  const editingTask =
+  const viewEditingTask =
     editingId == null
       ? null
       : (active.find((task) => task.id === editingId) ??
         completed.find((task) => task.id === editingId) ??
         null);
-  const editorMissing = editingId != null && editingTask == null;
+  const resolvedEditor = resolveOpenEditorTask({
+    editingId,
+    viewTask: viewEditingTask,
+    watched: watchedEditing,
+    heldTask: heldEditingTaskRef.current,
+  });
+  heldEditingTaskRef.current = resolvedEditor.hold;
+  const editingTask = resolvedEditor.task;
+  const editorMissing = resolvedEditor.missing;
   const composerDate = defaultComposerDate(composer, pane, today);
   const sections = buildSections(pane, active, today, addFromGroup);
-  const emptyCopy = EMPTY_COPY[pane.type === 'label' ? 'label' : (destination ?? 'inbox')];
+  const emptyCopy =
+    EMPTY_COPY[
+      pane.type === 'label'
+        ? 'label'
+        : pane.type === 'project'
+          ? 'project'
+          : (destination ?? 'inbox')
+    ];
   const composing = composer.kind !== 'closed';
-  const heading = headingForPane(pane, currentLabel);
-  const composerLabelIds =
-    composer.kind === 'view' && viewingLabel != null ? [viewingLabel] : undefined;
+  const heading = headingForPane(pane, currentLabel, currentProject);
+  const composerLabelIds = defaultComposerLabelIds(composer.kind, pane);
+  const composerProjectId = defaultComposerProjectId(composer.kind, pane);
+  const viewingArchivedProject =
+    pane.type === 'project' && projectsReady && currentProject?.isArchived === true;
+  const allowAddInView = !viewingArchivedProject;
 
   const sidebar = (
     <Sidebar
@@ -393,6 +502,9 @@ export function HomeScreen({
       onSelect={(next) => void selectPane(next)}
       onAddTask={() => void addFromSidebar()}
       {...(labels ? { favoriteLabels } : {})}
+      {...(projects
+        ? { projects: projectItems, onCreateProject: () => void addProjectFromSidebar() }
+        : {})}
     />
   );
 
@@ -431,6 +543,31 @@ export function HomeScreen({
                   }
                 : {})}
             />
+          ) : pane.type === 'projects' && projects ? (
+            <ProjectsScreen
+              repository={projects}
+              adding={addingProject}
+              onAddingChange={setAddingProject}
+              onOpenProject={(projectId) => {
+                setAddingProject(false);
+                void selectPane({ type: 'project', projectId });
+              }}
+              {...(layoutMode === 'overlay'
+                ? {
+                    leading: (
+                      <Pressable
+                        ref={menuButtonRef}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open navigation"
+                        onPress={() => setPresence(requestDrawerOpen)}
+                        style={({ pressed }) => [styles.menuButton, pressed && styles.pressed]}
+                      >
+                        <Text style={styles.menuIcon}>☰</Text>
+                      </Pressable>
+                    ),
+                  }
+                : {})}
+            />
           ) : (
             <TaskList
               sections={sections}
@@ -444,6 +581,9 @@ export function HomeScreen({
                 <TaskRow
                   task={task}
                   today={today}
+                  showProject={
+                    pane.type === 'today' || pane.type === 'upcoming' || pane.type === 'label'
+                  }
                   onOpen={(item) => void openTask(item)}
                   onSetCompletion={(item, completedValue) =>
                     void runWrite(
@@ -491,7 +631,8 @@ export function HomeScreen({
                     <Text accessibilityRole="header" style={styles.title}>
                       {heading}
                     </Text>
-                    {!loading && pane.type !== 'labels' && (
+                    {viewingArchivedProject && <Text style={styles.archivedBadge}>Archived</Text>}
+                    {!loading && isTaskListPane(pane) && (
                       <Text style={styles.count}>
                         {active.length} {active.length === 1 ? 'task' : 'tasks'}
                       </Text>
@@ -519,19 +660,26 @@ export function HomeScreen({
                         setEditingBaseline([]);
                       }}
                       {...(labels ? { labels } : {})}
+                      {...(projects ? { projects } : {})}
                     />
                   ) : composing ? (
                     <TaskComposer
-                      key={`${composer.kind}:${composerDate ?? 'none'}`}
+                      key={taskComposerInstanceKey(composer.kind, composerDate)}
                       initialDate={composerDate}
                       today={today}
                       registerDirtyCheck={registerDirtyCheck}
-                      onCreate={(input, labelIds) => repository.create(input, labelIds)}
+                      onCreate={(input, labelIds, projectId) =>
+                        repository.create(input, labelIds, projectId)
+                      }
                       onClose={() => setComposer({ kind: 'closed' })}
                       {...(labels ? { labels } : {})}
                       {...(composerLabelIds ? { initialLabelIds: composerLabelIds } : {})}
+                      {...(projects ? { projects } : {})}
+                      {...(composerProjectId != null
+                        ? { initialProjectId: composerProjectId }
+                        : {})}
                     />
-                  ) : (
+                  ) : allowAddInView ? (
                     <View style={styles.add}>
                       <ActionButton
                         label="+ Add task"
@@ -539,6 +687,10 @@ export function HomeScreen({
                         onPress={() => void addFromView()}
                       />
                     </View>
+                  ) : (
+                    <Text style={styles.archivedHint}>
+                      Unarchive this project to add new tasks. Existing tasks can still be edited.
+                    </Text>
                   )}
                   {actionError && (
                     <Text accessibilityRole="alert" style={styles.error}>
@@ -569,10 +721,12 @@ function viewQuery(
   upcoming: { startInclusive: string; endExclusive: string },
   completion: 'active' | 'completed',
 ): TaskViewQuery | null {
-  if (pane.type === 'labels') return null;
+  if (pane.type === 'labels' || pane.type === 'projects') return null;
   if (pane.type === 'inbox') return { destination: 'inbox', completion };
   if (pane.type === 'today') return { destination: 'today', today, completion };
   if (pane.type === 'label') return { destination: 'label', labelId: pane.labelId, completion };
+  if (pane.type === 'project')
+    return { destination: 'project', projectId: pane.projectId, completion };
   return {
     destination: 'upcoming',
     startInclusive: upcoming.startInclusive,
@@ -588,11 +742,17 @@ function defaultComposerDate(composer: Composer, pane: HomePane, today: string):
   return null;
 }
 
-function headingForPane(pane: HomePane, currentLabel: LabelListItem | null): string {
+function headingForPane(
+  pane: HomePane,
+  currentLabel: LabelListItem | null,
+  currentProject: ProjectListItem | null,
+): string {
   if (pane.type === 'today') return 'Today';
   if (pane.type === 'upcoming') return 'Upcoming';
   if (pane.type === 'labels') return 'Labels';
+  if (pane.type === 'projects') return 'Projects';
   if (pane.type === 'label') return currentLabel?.name ?? 'Label';
+  if (pane.type === 'project') return currentProject?.name ?? 'Project';
   return 'Inbox';
 }
 
@@ -603,7 +763,13 @@ function buildSections(
   onAddGroup: (date: string) => void,
 ): TaskSection[] {
   const now = new Date(`${today}T12:00:00`);
-  if (pane.type === 'inbox' || pane.type === 'label' || pane.type === 'labels') {
+  if (
+    pane.type === 'inbox' ||
+    pane.type === 'label' ||
+    pane.type === 'labels' ||
+    pane.type === 'project' ||
+    pane.type === 'projects'
+  ) {
     return [{ key: pane.type, tasks: active }];
   }
   if (pane.type === 'today') {
@@ -647,6 +813,14 @@ const styles = StyleSheet.create({
   menuIcon: { color: colors.text, fontSize: 22 },
   pressed: { opacity: 0.7 },
   title: { color: colors.text, fontSize: 28, fontWeight: '700' },
+  archivedBadge: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  archivedHint: { color: colors.muted, fontSize: 14, lineHeight: 20 },
   count: { color: colors.muted, fontSize: 13 },
   add: { alignSelf: 'flex-start' },
   empty: { paddingVertical: 64, alignItems: 'center', gap: 10 },

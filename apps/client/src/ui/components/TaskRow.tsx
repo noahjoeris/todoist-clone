@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Task } from '../../data/repositories';
-import { colors, priorityColors } from '../theme';
+import { colors, hexForLabelColor, priorityColors } from '../theme';
 import { LabelChipRow } from './LabelChip';
 import { TaskRescheduleMenu } from './TaskRescheduleMenu';
 import { dateLabel } from './task-date';
@@ -15,6 +15,7 @@ interface TaskRowProps {
   onRescheduleOpen?: () => void;
   onRescheduleClose?: () => void;
   onReschedule?: (date: string | null) => void;
+  showProject?: boolean;
 }
 
 export function TaskRow({
@@ -27,6 +28,7 @@ export function TaskRow({
   onRescheduleOpen,
   onRescheduleClose,
   onReschedule,
+  showProject = false,
 }: TaskRowProps) {
   const completed = task.completedAt != null;
   const now = today ? new Date(`${today}T12:00:00`) : new Date();
@@ -76,6 +78,22 @@ export function TaskRow({
               >
                 P{task.priority}
               </Text>
+              {showProject && task.projectId != null && (
+                <View style={styles.projectMark}>
+                  <View
+                    style={[
+                      styles.projectDot,
+                      {
+                        backgroundColor: hexForLabelColor(task.project?.color ?? 'charcoal'),
+                      },
+                    ]}
+                  />
+                  <Text style={[styles.projectName, completed && styles.completedMeta]}>
+                    {task.project?.name ?? 'Unavailable project'}
+                    {task.project?.isArchived ? ' · Archived' : ''}
+                  </Text>
+                </View>
+              )}
             </View>
             <LabelChipRow labels={task.labels} muted={completed} />
           </View>
@@ -139,6 +157,9 @@ const styles = StyleSheet.create({
   metadata: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 3 },
   date: { color: colors.green, fontSize: 12 },
   label: { fontSize: 12 },
+  projectMark: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  projectDot: { width: 8, height: 8, borderRadius: 4 },
+  projectName: { color: colors.muted, fontSize: 12 },
   reschedule: {
     minWidth: 44,
     minHeight: 44,

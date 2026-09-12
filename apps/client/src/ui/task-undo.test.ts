@@ -12,6 +12,8 @@ const TASK_A: Task = {
   completedAt: null,
   createdAt: '2026-09-10T08:00:00.000Z',
   labels: [],
+  projectId: null,
+  project: null,
 };
 
 const TASK_B: Task = {

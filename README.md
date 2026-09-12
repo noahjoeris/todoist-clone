@@ -38,10 +38,10 @@ completion and restores. Signed-in users can also create labels, attach them to 
 searchable picker (inline create uses charcoal and persists even if the task draft is cancelled),
 browse a label’s tasks, pin favorites in the sidebar, and manage rename/recolor/favorite/delete
 offline. Labels are account-only: guests see no label chips or navigation, and guest-task
-adoption does not copy labels. Account-owned personal projects (nullable membership;
-Inbox is no project) sync through the same upload path; client navigation and
-editing are the companion enhancement
-([#29](https://github.com/noahjoeris/todoist-clone/issues/29)). Guest-only use needs no `.env`: run `pnpm install`,
+adoption does not copy labels. Signed-in users organize tasks into personal projects
+(Inbox is `project_id IS NULL`): create/rename/recolor/reorder/favorite/archive/delete
+offline, pick a project from a searchable Inbox-inclusive picker, and open a project
+task list. Guest-only use needs no `.env`: run `pnpm install`,
 `pnpm build`, then `pnpm --filter @todoist-clone/client web` (or a native development build).
 View membership, ordering, and create defaults: [docs/task-views.md](docs/task-views.md).
 
@@ -286,9 +286,11 @@ In the selected Supabase project's **Authentication → URL Configuration**:
   Custom SMTP is a dependency if testers need other addresses; do not disable confirmation.
 - Prefix disposable tasks with tester/run (e.g. `qa-18-<date>-…`). Avoid real personal data
   and concurrent tests on one account where possible.
-- Cleanup owner: _TBD_. After smoke, delete prefixed tasks (and labels created for the run)
-  from the account, restore any browser network blocking, and do not leave blocked upload
-  endpoints.
+- Cleanup owner: _TBD_. After smoke, delete prefixed tasks (and labels/projects created
+  for the run) from the account, restore any browser network blocking, and do not leave
+  blocked upload endpoints. Duplicate-name offline races and oversized project
+  delete/reorder fail as documented (400 batch discard, or a local operation-limit
+  error that offers archive); they are not merged automatically.
 
 ### Redeploy and restore
 
