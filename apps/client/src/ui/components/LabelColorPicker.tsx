@@ -6,13 +6,19 @@ export function LabelColorPicker({
   value,
   onChange,
   disabled = false,
+  accessibilityLabel = 'Label color',
 }: {
   value: LabelColor;
   onChange: (color: LabelColor) => void;
   disabled?: boolean;
+  accessibilityLabel?: string;
 }) {
   return (
-    <View style={styles.grid} accessibilityRole="radiogroup" accessibilityLabel="Label color">
+    <View
+      style={styles.grid}
+      accessibilityRole="radiogroup"
+      accessibilityLabel={accessibilityLabel}
+    >
       {labelColorList.map((color) => {
         const selected = color === value;
         const name = nameForLabelColor(color);

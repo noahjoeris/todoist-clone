@@ -1,11 +1,13 @@
 import type { CommonPowerSyncDatabase } from '@powersync/common';
 import { type LabelSummary, parseLabelColor, sortLabelsByName } from './label';
 import { diffLabelAssociations, uniqueIds } from './label-associations';
+import { ProjectNotFoundError, type ProjectSummary, readSqliteFlag } from './project';
 import {
   type Task,
   type TaskInput,
   type TaskLabelEdit,
   TaskNotFoundError,
+  type TaskProjectEdit,
   TaskRestoreConflictError,
   taskInputSchema,
 } from './task';
@@ -17,8 +19,13 @@ import {
 } from './task-view';
 
 export interface TaskRepository {
-  create(input: TaskInput, labelIds?: readonly string[]): Promise<void>;
-  update(id: string, input: TaskInput, labels?: TaskLabelEdit): Promise<void>;
+  create(input: TaskInput, labelIds?: readonly string[], projectId?: string | null): Promise<void>;
+  update(
+    id: string,
+    input: TaskInput,
+    labels?: TaskLabelEdit,
+    project?: TaskProjectEdit,
+  ): Promise<void>;
   /** Complete or reopen explicitly; does not toggle from UI state. */
   setCompletion(id: string, completed: boolean): Promise<void>;
   /** Reads a snapshot and deletes in one local write. */
@@ -62,6 +69,11 @@ type TaskRow = {
   labelId?: string | null;
   labelName?: string | null;
   labelColor?: string | null;
+  projectId?: string | null;
+  projectSummaryId?: string | null;
+  projectName?: string | null;
+  projectColor?: string | null;
+  projectIsArchived?: unknown;
 };
 
 type TaskTx = {
@@ -75,9 +87,17 @@ const TASK_COLUMNS = `id, title, description, priority, scheduled_date AS schedu
 
 const TASK_TABLE_COLUMNS = `t.id, t.title, t.description, t.priority, t.scheduled_date AS scheduledDate,
   t.scheduled_time AS scheduledTime, t.completed_at AS completedAt, t.created_at AS createdAt,
+  t.project_id AS projectId,
+  p.id AS projectSummaryId, p.name AS projectName, p.color AS projectColor,
+  p.is_archived AS projectIsArchived,
   l.id AS labelId, l.name AS labelName, l.color AS labelColor`;
 
-const ACCOUNT_WATCH_TABLES = ['tasks', 'labels', 'task_labels'];
+const ACCOUNT_WATCH_TABLES = ['tasks', 'labels', 'task_labels', 'projects'];
+
+const TASK_ACCOUNT_JOINS = `FROM tasks t
+         LEFT JOIN projects p ON p.id = t.project_id AND p.user_id = t.user_id
+         LEFT JOIN task_labels tl ON tl.task_id = t.id AND tl.user_id = t.user_id
+         LEFT JOIN labels l ON l.id = tl.label_id AND l.user_id = t.user_id`;
 
 export function createTaskRepositories(
   database: TaskDatabase,
@@ -112,7 +132,7 @@ function createTableTaskRepository(
   target: TaskTarget,
 ): TaskRepository {
   return {
-    async create(input, labelIds) {
+    async create(input, labelIds, projectId) {
       const task = taskInputSchema.parse(input);
       const id = generateId();
       const createdAt = new Date().toISOString();
@@ -136,14 +156,20 @@ function createTableTaskRepository(
       }
 
       const selected = uniqueIds(labelIds ?? []);
+      const membership = projectId ?? null;
       await database.writeTransaction(async (tx) => {
+        if (membership != null) {
+          await assertOwnedProject(tx, target.userId, membership);
+        }
         await tx.execute(
           `INSERT INTO tasks
-            (id, user_id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, user_id, project_id, title, description, priority, scheduled_date, scheduled_time,
+             completed_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             id,
             target.userId,
+            membership,
             task.title,
             task.description,
             task.priority,
@@ -158,7 +184,7 @@ function createTableTaskRepository(
       });
     },
 
-    async update(id, input, labels) {
+    async update(id, input, labels, project) {
       const task = taskInputSchema.parse(input);
       await database.writeTransaction(async (tx) => {
         const current = await readOwnedTask(tx, target, id);
@@ -185,6 +211,13 @@ function createTableTaskRepository(
         if (current.scheduledTime !== task.scheduledTime) {
           assignments.push('scheduled_time = ?');
           params.push(task.scheduledTime);
+        }
+        if (project && target.table === 'tasks' && current.projectId !== project.projectId) {
+          if (project.projectId != null) {
+            await assertOwnedProject(tx, target.userId, project.projectId);
+          }
+          assignments.push('project_id = ?');
+          params.push(project.projectId);
         }
 
         if (assignments.length > 0) {
@@ -271,13 +304,16 @@ function createTableTaskRepository(
           return;
         }
         const now = new Date().toISOString();
+        const membership = await restoreProjectId(tx, target.userId, task.projectId);
         await tx.execute(
           `INSERT INTO tasks
-            (id, user_id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, user_id, project_id, title, description, priority, scheduled_date, scheduled_time,
+             completed_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             task.id,
             target.userId,
+            membership,
             task.title,
             task.description,
             task.priority,
@@ -315,9 +351,7 @@ function createTableTaskRepository(
       return watchQuery<TaskRow>(
         database,
         `SELECT ${TASK_TABLE_COLUMNS}
-         FROM tasks t
-         LEFT JOIN task_labels tl ON tl.task_id = t.id AND tl.user_id = t.user_id
-         LEFT JOIN labels l ON l.id = tl.label_id AND l.user_id = t.user_id
+         ${TASK_ACCOUNT_JOINS}
          WHERE t.user_id = ?
          ORDER BY t.created_at DESC, t.id DESC, lower(l.name) ASC, l.id ASC`,
         [target.userId],
@@ -380,7 +414,7 @@ function compileViewQuery(
   const view = viewPredicate(query);
 
   if (target.table === 'local_tasks') {
-    if (query.destination === 'label') {
+    if (query.destination === 'label' || query.destination === 'project') {
       return {
         sql: `SELECT ${TASK_COLUMNS} FROM local_tasks WHERE 0`,
         parameters: [],
@@ -404,6 +438,7 @@ function compileViewQuery(
          FROM tasks t
          INNER JOIN task_labels membership
            ON membership.task_id = t.id AND membership.label_id = ? AND membership.user_id = t.user_id
+         LEFT JOIN projects p ON p.id = t.project_id AND p.user_id = t.user_id
          LEFT JOIN task_labels tl ON tl.task_id = t.id AND tl.user_id = t.user_id
          LEFT JOIN labels l ON l.id = tl.label_id AND l.user_id = t.user_id
          WHERE t.user_id = ? AND ${viewSql}
@@ -412,12 +447,21 @@ function compileViewQuery(
     };
   }
 
+  if (query.destination === 'project') {
+    return {
+      sql: `SELECT ${TASK_TABLE_COLUMNS}
+         ${TASK_ACCOUNT_JOINS}
+         WHERE t.user_id = ? AND t.project_id = ? AND ${viewSql}
+         ${qualifyOrderSql(viewOrderSql(query))}, lower(l.name) ASC, l.id ASC`,
+      parameters: [userId, query.projectId, ...view.params],
+    };
+  }
+
+  const inboxMembership = query.destination === 'inbox' ? ' AND t.project_id IS NULL' : '';
   return {
     sql: `SELECT ${TASK_TABLE_COLUMNS}
-         FROM tasks t
-         LEFT JOIN task_labels tl ON tl.task_id = t.id AND tl.user_id = t.user_id
-         LEFT JOIN labels l ON l.id = tl.label_id AND l.user_id = t.user_id
-         WHERE t.user_id = ? AND ${viewSql}
+         ${TASK_ACCOUNT_JOINS}
+         WHERE t.user_id = ? AND ${viewSql}${inboxMembership}
          ${qualifyOrderSql(viewOrderSql(query))}, lower(l.name) ASC, l.id ASC`,
     parameters: [userId, ...view.params],
   };
@@ -426,7 +470,8 @@ function compileViewQuery(
 function qualifyTaskColumns(sql: string): string {
   return sql
     .replaceAll('completed_at', 't.completed_at')
-    .replaceAll('scheduled_date', 't.scheduled_date');
+    .replaceAll('scheduled_date', 't.scheduled_date')
+    .replaceAll('project_id', 't.project_id');
 }
 
 function qualifyOrderSql(order: string): string {
@@ -445,9 +490,13 @@ function compileActiveCountQuery(
   today: string,
 ): { sql: string; parameters: string[] } {
   const owner = ownerScope(target);
+  const inboxPredicate =
+    target.table === 'tasks'
+      ? 'completed_at IS NULL AND project_id IS NULL'
+      : 'completed_at IS NULL';
   return {
     sql: `SELECT
-            COALESCE(SUM(CASE WHEN completed_at IS NULL THEN 1 ELSE 0 END), 0) AS inbox,
+            COALESCE(SUM(CASE WHEN ${inboxPredicate} THEN 1 ELSE 0 END), 0) AS inbox,
             COALESCE(SUM(CASE WHEN completed_at IS NULL AND scheduled_date IS NOT NULL AND scheduled_date <= ? THEN 1 ELSE 0 END), 0) AS today
          FROM ${owner.from}
          WHERE ${owner.sql}`,
@@ -492,9 +541,7 @@ async function readOwnedTask(tx: TaskTx, target: TaskTarget, id: string): Promis
   }
   const rows = await tx.getAll<TaskRow>(
     `SELECT ${TASK_TABLE_COLUMNS}
-     FROM tasks t
-     LEFT JOIN task_labels tl ON tl.task_id = t.id AND tl.user_id = t.user_id
-     LEFT JOIN labels l ON l.id = tl.label_id AND l.user_id = t.user_id
+     ${TASK_ACCOUNT_JOINS}
      WHERE t.id = ? AND t.user_id = ?
      ORDER BY lower(l.name) ASC, l.id ASC`,
     [id, target.userId],
@@ -595,7 +642,7 @@ function collectAccountTasks(rows: TaskRow[]): Task[] {
 }
 
 function mapGuestTaskRow(row: TaskRow): Task {
-  return { ...mapTaskFields(row), labels: [] };
+  return { ...mapTaskFields(row), labels: [], projectId: null, project: null };
 }
 
 function mapTaskFields(row: TaskRow): Task {
@@ -609,7 +656,42 @@ function mapTaskFields(row: TaskRow): Task {
     completedAt: row.completedAt == null ? null : normalizeTimestamptz(row.completedAt),
     createdAt: normalizeTimestamptz(row.createdAt),
     labels: [],
+    projectId: row.projectId ?? null,
+    project: projectSummaryFromRow(row),
   };
+}
+
+function projectSummaryFromRow(row: TaskRow): ProjectSummary | null {
+  if (row.projectSummaryId == null || row.projectName == null || row.projectColor == null) {
+    return null;
+  }
+  return {
+    id: row.projectSummaryId,
+    name: row.projectName,
+    color: parseLabelColor(row.projectColor),
+    isArchived: readSqliteFlag(row.projectIsArchived),
+  };
+}
+
+async function assertOwnedProject(tx: TaskTx, userId: string, projectId: string): Promise<void> {
+  const row = await tx.getOptional<{ id: string }>(
+    'SELECT id FROM projects WHERE id = ? AND user_id = ?',
+    [projectId, userId],
+  );
+  if (!row) throw new ProjectNotFoundError();
+}
+
+async function restoreProjectId(
+  tx: TaskTx,
+  userId: string,
+  projectId: string | null,
+): Promise<string | null> {
+  if (projectId == null) return null;
+  const row = await tx.getOptional<{ id: string }>(
+    'SELECT id FROM projects WHERE id = ? AND user_id = ?',
+    [projectId, userId],
+  );
+  return row ? projectId : null;
 }
 
 function labelSummaryFromRow(row: TaskRow): LabelSummary | null {

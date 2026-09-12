@@ -11,6 +11,7 @@ import type {
   WatchHandler,
 } from '@powersync/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ProjectNotFoundError } from './project';
 import { TaskNotFoundError, TaskRestoreConflictError } from './task';
 import { createTaskRepositories, createTaskRepository } from './task-repository';
 
@@ -56,7 +57,7 @@ function bindSqlite(
 
 function createAccountTables(sqlite: DatabaseSync) {
   sqlite.exec(`CREATE TABLE tasks (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, description TEXT, priority INTEGER,
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT, title TEXT, description TEXT, priority INTEGER,
       scheduled_date TEXT, scheduled_time TEXT, completed_at TEXT, created_at TEXT, updated_at TEXT
     );
     CREATE TABLE labels (
@@ -66,6 +67,11 @@ function createAccountTables(sqlite: DatabaseSync) {
     CREATE TABLE task_labels (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, task_id TEXT NOT NULL, label_id TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE projects (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,
+      is_favorite INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0,
+      is_archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );`);
 }
 
@@ -331,6 +337,8 @@ describe('task repository', () => {
       completedAt: '2026-09-11T15:00:00.000Z',
       createdAt: '2026-09-10T08:00:00.000Z',
       labels: [],
+      projectId: null,
+      project: null,
     });
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM local_tasks').get()).toEqual({ count: 0 });
 
@@ -375,6 +383,8 @@ describe('task repository', () => {
       completedAt: null,
       createdAt: '2026-09-01T00:00:00.000Z',
       labels: [],
+      projectId: null,
+      project: null,
     };
     await expect(repository.restore(snapshot)).rejects.toBeInstanceOf(TaskRestoreConflictError);
     expect(sqlite.prepare('SELECT title FROM local_tasks').get()).toEqual({ title: 'Live' });
@@ -490,6 +500,8 @@ describe('account-owned task repository', () => {
         completedAt: null,
         createdAt: '2026-09-09T10:00:00.000Z',
         labels: [],
+        projectId: null,
+        project: null,
       },
     ]);
   });
@@ -539,6 +551,8 @@ describe('account-owned task repository', () => {
         completedAt: '2026-09-11T15:00:00.000Z',
         createdAt: '2026-09-10T12:00:00.000000Z',
         labels: [],
+        projectId: null,
+        project: null,
       },
     ]);
 
@@ -580,6 +594,8 @@ describe('account-owned task repository', () => {
         completedAt: null,
         createdAt: '2026-09-01T00:00:00.000Z',
         labels: [],
+        projectId: null,
+        project: null,
       }),
     ).rejects.toBeInstanceOf(TaskRestoreConflictError);
     expect(sqlite.prepare('SELECT title, user_id FROM tasks').get()).toEqual({
@@ -831,6 +847,26 @@ describe('task view queries', () => {
     expect(firstPage).toEqual(['Soon']);
     expect(expanded).toEqual(['Soon', 'Later']);
     expect(new Set(expanded).size).toBe(expanded.length);
+  });
+
+  it('does not mention project_id in guest inbox SQL', () => {
+    insertLocal(sqlite, { id: 'u', title: 'Unscheduled' });
+    repository.subscribeView({ destination: 'inbox', completion: 'active' }, vi.fn(), vi.fn());
+    const sql = String(watch.mock.calls[0]?.[0]);
+    expect(sql).not.toMatch(/project_id/);
+    repository.subscribeActiveCounts('2026-09-12', vi.fn(), vi.fn());
+    expect(String(watch.mock.calls[1]?.[0])).not.toMatch(/project_id/);
+  });
+
+  it('returns no guest tasks for a project destination', () => {
+    insertLocal(sqlite, { id: 'u', title: 'Unscheduled' });
+    expect(
+      titles({
+        destination: 'project',
+        projectId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        completion: 'active',
+      }),
+    ).toEqual([]);
   });
 });
 
@@ -1114,5 +1150,231 @@ describe('account-owned task labels', () => {
     insertLabel({ id: 'lab-b', name: 'B', userId: USER_B });
     await repositories.forUser(USER_A).create({ title: 'Ship' }, ['lab-b']);
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM task_labels').get()).toEqual({ count: 0 });
+  });
+});
+
+describe('account-owned task projects', () => {
+  const USER_A = '11111111-1111-4111-8111-111111111111';
+  const USER_B = '22222222-2222-4222-8222-222222222222';
+  const PROJECT_WORK = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const PROJECT_HOME = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  let sqlite: DatabaseSync;
+  let directory: string;
+  const execute =
+    vi.fn<(sql: string, parameters?: SQLInputValue[]) => Promise<QueryResult<never>>>();
+  const watch = vi.fn<CommonPowerSyncDatabase['watchWithCallback']>();
+  const writeTransaction = vi.fn();
+  const repositories = createTaskRepositories(
+    { execute, watchWithCallback: watch, writeTransaction },
+    randomUUID,
+  );
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    directory = mkdtempSync(join(tmpdir(), 'todoist-task-projects-'));
+    sqlite = new DatabaseSync(join(directory, 'tasks.sqlite'));
+    createAccountTables(sqlite);
+    bindSqlite(sqlite, execute, writeTransaction);
+    bindWatch(sqlite, watch);
+    insertProject({ id: PROJECT_WORK, name: 'Work' });
+    insertProject({ id: PROJECT_HOME, name: 'Home', color: 'blue' });
+  });
+
+  function insertLabel(row: { id: string; name: string; userId?: string; color?: string }) {
+    sqlite
+      .prepare(
+        `INSERT INTO labels (id, user_id, name, color, is_favorite, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 0, '2026-09-10T08:00:00.000Z', '2026-09-10T08:00:00.000Z')`,
+      )
+      .run(row.id, row.userId ?? USER_A, row.name, row.color ?? 'charcoal');
+  }
+
+  afterEach(() => {
+    sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  function insertProject(row: {
+    id: string;
+    name: string;
+    userId?: string;
+    color?: string;
+    archived?: boolean;
+  }) {
+    sqlite
+      .prepare(
+        `INSERT INTO projects (id, user_id, name, color, is_favorite, sort_order, is_archived, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 0, 0, ?, '2026-09-10T08:00:00.000Z', '2026-09-10T08:00:00.000Z')`,
+      )
+      .run(row.id, row.userId ?? USER_A, row.name, row.color ?? 'charcoal', row.archived ? 1 : 0);
+  }
+
+  function titles(query: Parameters<ReturnType<typeof repositories.forUser>['subscribeView']>[0]) {
+    const onTasks = vi.fn();
+    repositories.forUser(USER_A).subscribeView(query, onTasks, vi.fn());
+    const tasks = onTasks.mock.calls[0]?.[0] as { title: string }[] | undefined;
+    if (tasks == null) throw new Error('expected view results');
+    return tasks.map((task) => task.title);
+  }
+
+  function counts(today: string) {
+    const onCounts = vi.fn();
+    repositories.forUser(USER_A).subscribeActiveCounts(today, onCounts, vi.fn());
+    return onCounts.mock.calls[0]?.[0];
+  }
+
+  it('creates into a project and treats omitted membership as Inbox', async () => {
+    await repositories.forUser(USER_A).create({ title: 'Inbox' });
+    await repositories.forUser(USER_A).create({ title: 'Work task' }, [], PROJECT_WORK);
+    expect(sqlite.prepare('SELECT title, project_id FROM tasks ORDER BY title').all()).toEqual([
+      { title: 'Inbox', project_id: null },
+      { title: 'Work task', project_id: PROJECT_WORK },
+    ]);
+  });
+
+  it('rejects a missing or foreign project before writing', async () => {
+    await expect(
+      repositories.forUser(USER_A).create({ title: 'Nope' }, [], MISSING_ID),
+    ).rejects.toBeInstanceOf(ProjectNotFoundError);
+    await expect(
+      repositories.forUser(USER_A).create({ title: 'Nope' }, [], PROJECT_WORK),
+    ).resolves.toBeUndefined();
+    sqlite.prepare('DELETE FROM tasks').run();
+    insertProject({ id: 'p-b', name: 'Theirs', userId: USER_B });
+    await expect(
+      repositories.forUser(USER_A).create({ title: 'Nope' }, [], 'p-b'),
+    ).rejects.toBeInstanceOf(ProjectNotFoundError);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 });
+  });
+
+  it('allows an in-flight archived destination and explicit Inbox move', async () => {
+    sqlite.prepare('UPDATE projects SET is_archived = 1 WHERE id = ?').run(PROJECT_WORK);
+    await repositories.forUser(USER_A).create({ title: 'Archived dest' }, [], PROJECT_WORK);
+    const id = loadId(sqlite, 'tasks');
+    await repositories.forUser(USER_A).update(
+      id,
+      {
+        title: 'Archived dest',
+        description: '',
+        priority: 4,
+        scheduledDate: null,
+        scheduledTime: null,
+      },
+      undefined,
+      { projectId: null },
+    );
+    expect(sqlite.prepare('SELECT project_id FROM tasks').get()).toEqual({ project_id: null });
+  });
+
+  it('does not overwrite a remote project move on a field-only edit', async () => {
+    await repositories.forUser(USER_A).create({ title: 'Ship' }, [], PROJECT_WORK);
+    const id = loadId(sqlite, 'tasks');
+    sqlite.prepare('UPDATE tasks SET project_id = ? WHERE id = ?').run(PROJECT_HOME, id);
+    await repositories.forUser(USER_A).update(id, {
+      title: 'Renamed',
+      description: '',
+      priority: 4,
+      scheduledDate: null,
+      scheduledTime: null,
+    });
+    expect(sqlite.prepare('SELECT title, project_id FROM tasks').get()).toEqual({
+      title: 'Renamed',
+      project_id: PROJECT_HOME,
+    });
+  });
+
+  it('counts only null-membership Inbox tasks and keeps Today cross-project', async () => {
+    await repositories.forUser(USER_A).create({ title: 'Inbox undated' });
+    await repositories
+      .forUser(USER_A)
+      .create({ title: 'Inbox today', scheduledDate: '2026-09-12' }, [], null);
+    await repositories
+      .forUser(USER_A)
+      .create({ title: 'Work today', scheduledDate: '2026-09-12' }, [], PROJECT_WORK);
+    sqlite.prepare('UPDATE projects SET is_archived = 1 WHERE id = ?').run(PROJECT_WORK);
+
+    expect(titles({ destination: 'inbox', completion: 'active' })).toEqual(
+      expect.arrayContaining(['Inbox today', 'Inbox undated']),
+    );
+    expect(titles({ destination: 'inbox', completion: 'active' })).toHaveLength(2);
+    expect(titles({ destination: 'today', today: '2026-09-12', completion: 'active' })).toEqual(
+      expect.arrayContaining(['Inbox today', 'Work today']),
+    );
+    expect(
+      titles({ destination: 'today', today: '2026-09-12', completion: 'active' }),
+    ).toHaveLength(2);
+    expect(
+      titles({ destination: 'project', projectId: PROJECT_WORK, completion: 'active' }),
+    ).toEqual(['Work today']);
+    expect(counts('2026-09-12')).toEqual({ inbox: 2, today: 2 });
+  });
+
+  it('orders project views like Inbox and includes completed membership', async () => {
+    await repositories.forUser(USER_A).create({ title: 'P4 new', priority: 4 }, [], PROJECT_WORK);
+    await repositories.forUser(USER_A).create({ title: 'P1', priority: 1 }, [], PROJECT_WORK);
+    await repositories.forUser(USER_A).create({ title: 'Other' }, [], PROJECT_HOME);
+    await repositories.forUser(USER_A).create({ title: 'Done' }, [], PROJECT_WORK);
+    const doneId = sqlite.prepare("SELECT id FROM tasks WHERE title = 'Done'").get() as {
+      id: string;
+    };
+    await repositories.forUser(USER_A).setCompletion(doneId.id, true);
+
+    expect(
+      titles({ destination: 'project', projectId: PROJECT_WORK, completion: 'active' }),
+    ).toEqual(['P1', 'P4 new']);
+    expect(
+      titles({ destination: 'project', projectId: PROJECT_WORK, completion: 'completed' }),
+    ).toEqual(['Done']);
+  });
+
+  it('keeps a stored project_id when the summary join is missing', async () => {
+    await repositories.forUser(USER_A).create({ title: 'Orphan' }, [], PROJECT_WORK);
+    sqlite.prepare('DELETE FROM projects WHERE id = ?').run(PROJECT_WORK);
+    const onTasks = vi.fn();
+    repositories.forUser(USER_A).subscribe(onTasks, vi.fn());
+    expect(onTasks.mock.calls[0]?.[0][0]).toMatchObject({
+      title: 'Orphan',
+      projectId: PROJECT_WORK,
+      project: null,
+    });
+    expect(titles({ destination: 'inbox', completion: 'active' })).toEqual([]);
+  });
+
+  it('propagates live project rename and color through the task watch', async () => {
+    await repositories.forUser(USER_A).create({ title: 'Ship' }, [], PROJECT_WORK);
+    const onTasks = vi.fn();
+    repositories.forUser(USER_A).subscribe(onTasks, vi.fn());
+    expect(onTasks.mock.calls[0]?.[0][0]).toMatchObject({
+      project: { id: PROJECT_WORK, name: 'Work', color: 'charcoal', isArchived: false },
+    });
+    sqlite
+      .prepare('UPDATE projects SET name = ?, color = ? WHERE id = ?')
+      .run('Office', 'red', PROJECT_WORK);
+    const sql = String(watch.mock.calls[0]?.[0]);
+    const parameters = watch.mock.calls[0]?.[1] as SQLInputValue[];
+    const array = sqlite.prepare(sql).all(...parameters);
+    watch.mock.calls[0]?.[2]?.onResult?.({
+      array,
+      *[Symbol.iterator]() {
+        yield* array;
+        return undefined;
+      },
+    });
+    expect(onTasks.mock.calls.at(-1)?.[0][0]).toMatchObject({
+      project: { id: PROJECT_WORK, name: 'Office', color: 'red' },
+    });
+  });
+
+  it('restores membership only when the owned project still exists', async () => {
+    insertLabel({ id: 'lab-work', name: 'Work' });
+    await repositories.forUser(USER_A).create({ title: 'Ship' }, ['lab-work'], PROJECT_WORK);
+    const snapshot = await repositories.forUser(USER_A).delete(loadId(sqlite, 'tasks'));
+    expect(snapshot.projectId).toBe(PROJECT_WORK);
+    sqlite.prepare('DELETE FROM projects WHERE id = ?').run(PROJECT_WORK);
+    await repositories.forUser(USER_A).restore(snapshot);
+    expect(sqlite.prepare('SELECT project_id FROM tasks').get()).toEqual({ project_id: null });
+    expect(sqlite.prepare('SELECT label_id FROM task_labels').all()).toEqual([
+      { label_id: 'lab-work' },
+    ]);
   });
 });

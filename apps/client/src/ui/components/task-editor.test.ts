@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { labelIdsForSubmit } from '../../data/repositories/label-associations';
-import { holdOpenEditorLabelIds, labelIdsFromTask } from './task-editor';
+import { holdOpenEditorLabelIds, labelIdsFromTask, projectIdFromTask } from './task-editor';
 
 const task = (ids: string[]) => ({ labels: ids.map((id) => ({ id })) });
 
@@ -24,5 +24,13 @@ describe('open-editor label baseline', () => {
     const held = holdOpenEditorLabelIds(undefined, task(['a']));
     const baseline = holdOpenEditorLabelIds(held, task([]));
     expect(labelIdsForSubmit(baseline, baseline, 'when-changed')).toBeUndefined();
+  });
+});
+
+describe('open-editor project baseline', () => {
+  it('reads Inbox as null and keeps the mount-time project id', () => {
+    expect(projectIdFromTask(null)).toBeNull();
+    expect(projectIdFromTask({ projectId: null })).toBeNull();
+    expect(projectIdFromTask({ projectId: 'p1' })).toBe('p1');
   });
 });

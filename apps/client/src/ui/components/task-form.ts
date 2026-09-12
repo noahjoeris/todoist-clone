@@ -4,6 +4,15 @@ export function isTaskSubmitDisabled(input: {
   missing: boolean;
   title: string;
   creatingLabel: boolean;
+  projectsReady?: boolean;
+  projectSelectionInvalid?: boolean;
 }): boolean {
-  return input.busy || input.missing || input.title.trim() === '' || input.creatingLabel;
+  return (
+    input.busy ||
+    input.missing ||
+    input.title.trim() === '' ||
+    input.creatingLabel ||
+    input.projectsReady === false ||
+    input.projectSelectionInvalid === true
+  );
 }

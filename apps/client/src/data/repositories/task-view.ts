@@ -13,7 +13,8 @@ export type TaskViewQuery =
       endExclusive: string;
       completion: TaskCompletionSelection;
     }
-  | { destination: 'label'; labelId: string; completion: TaskCompletionSelection };
+  | { destination: 'label'; labelId: string; completion: TaskCompletionSelection }
+  | { destination: 'project'; projectId: string; completion: TaskCompletionSelection };
 
 export type TaskActiveCounts = {
   inbox: number;
@@ -39,6 +40,7 @@ export function viewPredicate(query: TaskViewQuery): { sql: string; params: stri
         params: [query.startInclusive, query.endExclusive],
       };
     case 'label':
+    case 'project':
       return { sql: completion, params: [] };
   }
 }
@@ -47,7 +49,11 @@ export function viewOrderSql(query: TaskViewQuery): string {
   if (query.completion === 'completed') {
     return 'ORDER BY completed_at DESC, id DESC';
   }
-  if (query.destination === 'inbox' || query.destination === 'label') {
+  if (
+    query.destination === 'inbox' ||
+    query.destination === 'label' ||
+    query.destination === 'project'
+  ) {
     return 'ORDER BY priority ASC, created_at DESC, id DESC';
   }
   return `ORDER BY scheduled_date ASC, CASE WHEN scheduled_time IS NULL THEN 1 ELSE 0 END ASC, scheduled_time ASC, priority ASC, created_at DESC, id DESC`;
