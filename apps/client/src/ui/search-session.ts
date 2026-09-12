@@ -1,8 +1,46 @@
-import { SEARCH_TOP_COUNT } from '../data/repositories';
+import { parseSearchQuery, SEARCH_TOP_COUNT, type TaskSearchSnapshot } from '../data/repositories';
 
 export const SEARCH_DEBOUNCE_MS = 150;
+export const EMPTY_SEARCH_SNAPSHOT: TaskSearchSnapshot = { tasks: [], hasMore: false };
 
 export type SearchResultsStatus = 'idle' | 'loading' | 'updating' | 'ready' | 'error';
+
+export function visibleSearchResults(args: {
+  input: string;
+  activeQuery: string;
+  snapshotQuery: string;
+  snapshot: TaskSearchSnapshot;
+  status: SearchResultsStatus;
+}): {
+  snapshot: TaskSearchSnapshot;
+  status: SearchResultsStatus;
+  queryPending: boolean;
+} {
+  const parsedInput = parseSearchQuery(args.input);
+  const queryPending = parsedInput.status === 'ready' && args.input !== args.activeQuery;
+  const awaitingReplacement =
+    parsedInput.status === 'ready' && args.snapshotQuery !== args.activeQuery;
+  if (parsedInput.status === 'invalid') {
+    return { snapshot: EMPTY_SEARCH_SNAPSHOT, status: 'error', queryPending: false };
+  }
+  if (queryPending || awaitingReplacement) {
+    return { snapshot: EMPTY_SEARCH_SNAPSHOT, status: 'loading', queryPending: true };
+  }
+  return { snapshot: args.snapshot, status: args.status, queryPending: false };
+}
+
+export async function runRecentSearchMutation(
+  action: () => Promise<void>,
+  onError: () => void,
+  onSuccess?: () => void,
+): Promise<void> {
+  try {
+    await action();
+    onSuccess?.();
+  } catch {
+    onError();
+  }
+}
 
 export function splitSearchSections<T>(
   tasks: readonly T[],

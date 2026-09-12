@@ -1772,4 +1772,25 @@ describe('account task keyword search', () => {
       tables: ['tasks', 'labels', 'task_labels', 'projects'],
     });
   });
+
+  it('orders same-rank hits by clock time across RFC 3339 and PowerSync timestamps', () => {
+    insertTask({
+      id: 'local-morning',
+      userId: USER_A,
+      title: 'Buy milk',
+      createdAt: '2026-09-12T01:00:00.000Z',
+    });
+    insertTask({
+      id: 'synced-evening',
+      userId: USER_A,
+      title: 'Buy milk',
+      createdAt: '2026-09-12 23:00:00.000Z',
+    });
+    const onResults = vi.fn();
+    repositories.forUser(USER_A).subscribeSearch({ query: 'buy milk' }, onResults, vi.fn());
+    expect(onResults.mock.calls[0]?.[0].tasks.map((task: { id: string }) => task.id)).toEqual([
+      'synced-evening',
+      'local-morning',
+    ]);
+  });
 });

@@ -6,9 +6,13 @@ import {
   type TaskRepository,
   type TaskSearchSnapshot,
 } from '../../data/repositories';
-import { createQueryDebouncer, type SearchResultsStatus } from '../search-session';
-
-const EMPTY_SNAPSHOT: TaskSearchSnapshot = { tasks: [], hasMore: false };
+import {
+  createQueryDebouncer,
+  EMPTY_SEARCH_SNAPSHOT,
+  runRecentSearchMutation,
+  type SearchResultsStatus,
+  visibleSearchResults,
+} from '../search-session';
 
 export function useSearchSession(
   tasks: TaskRepository,
@@ -18,11 +22,13 @@ export function useSearchSession(
   const [input, setInputState] = useState('');
   const [activeQuery, setActiveQuery] = useState('');
   const [limit, setLimit] = useState(SEARCH_PAGE_SIZE);
-  const [snapshot, setSnapshot] = useState<TaskSearchSnapshot>(EMPTY_SNAPSHOT);
+  const [snapshot, setSnapshot] = useState<TaskSearchSnapshot>(EMPTY_SEARCH_SNAPSHOT);
+  const [snapshotQuery, setSnapshotQuery] = useState('');
   const [status, setStatus] = useState<SearchResultsStatus>('idle');
   const [searchRetry, setSearchRetry] = useState(0);
   const [recentQueries, setRecentQueries] = useState<string[]>([]);
   const [recentsError, setRecentsError] = useState(false);
+  const [recentsWriteError, setRecentsWriteError] = useState(false);
   const [recentsRetry, setRecentsRetry] = useState(0);
   const searchGeneration = useRef(0);
   const recentsGeneration = useRef(0);
@@ -51,10 +57,12 @@ export function useSearchSession(
     setInputState('');
     setActiveQuery('');
     setLimit(SEARCH_PAGE_SIZE);
-    setSnapshot(EMPTY_SNAPSHOT);
+    setSnapshot(EMPTY_SEARCH_SNAPSHOT);
+    setSnapshotQuery('');
     setStatus('idle');
     setRecentQueries([]);
     setRecentsError(false);
+    setRecentsWriteError(false);
     lastSearchQuery.current = '';
   }, [open, debouncer]);
 
@@ -82,42 +90,57 @@ export function useSearchSession(
     if (parsed.status !== 'ready') {
       searchGeneration.current += 1;
       lastSearchQuery.current = activeQuery;
-      setSnapshot(EMPTY_SNAPSHOT);
+      setSnapshot(EMPTY_SEARCH_SNAPSHOT);
+      setSnapshotQuery(activeQuery);
       setStatus('idle');
       return;
     }
     const generation = ++searchGeneration.current;
-    const replacing = lastSearchQuery.current !== activeQuery;
-    lastSearchQuery.current = activeQuery;
+    const subscribedQuery = activeQuery;
+    const replacing = lastSearchQuery.current !== subscribedQuery;
+    lastSearchQuery.current = subscribedQuery;
     if (replacing) {
-      setSnapshot(EMPTY_SNAPSHOT);
+      setSnapshot(EMPTY_SEARCH_SNAPSHOT);
       setStatus('loading');
     } else {
       setStatus('updating');
     }
     const stop = tasks.subscribeSearch(
-      { query: activeQuery, limit },
+      { query: subscribedQuery, limit },
       (next) => {
         if (generation !== searchGeneration.current || !openRef.current) return;
         setSnapshot(next);
+        setSnapshotQuery(subscribedQuery);
         setStatus('ready');
       },
       () => {
         if (generation !== searchGeneration.current || !openRef.current) return;
+        setSnapshotQuery(subscribedQuery);
         setStatus('error');
       },
     );
     return () => stop();
   }, [tasks, activeQuery, limit, open, searchRetry]);
 
-  const parsedInput = parseSearchQuery(input);
-  const queryPending = parsedInput.status === 'ready' && input !== activeQuery;
-  const visibleSnapshot = queryPending ? EMPTY_SNAPSHOT : snapshot;
-  const visibleStatus: SearchResultsStatus = queryPending
-    ? 'loading'
-    : parsedInput.status === 'invalid'
-      ? 'error'
-      : status;
+  const visible = visibleSearchResults({
+    input,
+    activeQuery,
+    snapshotQuery,
+    snapshot,
+    status,
+  });
+
+  const mutateRecents = useCallback((action: () => Promise<void>) => {
+    return runRecentSearchMutation(
+      action,
+      () => {
+        if (openRef.current) setRecentsWriteError(true);
+      },
+      () => {
+        if (openRef.current) setRecentsWriteError(false);
+      },
+    );
+  }, []);
 
   const setInput = useCallback(
     (value: string) => {
@@ -129,16 +152,16 @@ export function useSearchSession(
 
   const submit = useCallback(() => {
     debouncer.flush(input);
-    void recents.record(input);
-  }, [debouncer, input, recents]);
+    void mutateRecents(() => recents.record(input));
+  }, [debouncer, input, recents, mutateRecents]);
 
   const applyRecent = useCallback(
     (query: string) => {
       setInputState(query);
       debouncer.flush(query);
-      void recents.record(query);
+      void mutateRecents(() => recents.record(query));
     },
-    [debouncer, recents],
+    [debouncer, recents, mutateRecents],
   );
 
   const loadMore = useCallback(() => {
@@ -153,11 +176,20 @@ export function useSearchSession(
     setRecentsRetry((current) => current + 1);
   }, []);
 
-  const recordCurrent = useCallback(() => recents.record(input), [recents, input]);
+  const recordCurrent = useCallback(
+    () => mutateRecents(() => recents.record(input)),
+    [mutateRecents, recents, input],
+  );
 
-  const removeRecent = useCallback((query: string) => recents.remove(query), [recents]);
+  const removeRecent = useCallback(
+    (query: string) => mutateRecents(() => recents.remove(query)),
+    [mutateRecents, recents],
+  );
 
-  const clearRecents = useCallback(() => recents.clear(), [recents]);
+  const clearRecents = useCallback(
+    () => mutateRecents(() => recents.clear()),
+    [mutateRecents, recents],
+  );
 
   return {
     input,
@@ -166,15 +198,16 @@ export function useSearchSession(
     applyRecent,
     recents: recentQueries,
     recentsError,
+    recentsWriteError,
     retryRecents,
-    tasks: visibleSnapshot.tasks,
-    hasMore: visibleSnapshot.hasMore,
-    status: visibleStatus,
+    tasks: visible.snapshot.tasks,
+    hasMore: visible.snapshot.hasMore,
+    status: visible.status,
     retrySearch,
     loadMore,
     recordCurrent,
     removeRecent,
     clearRecents,
-    queryPending,
+    queryPending: visible.queryPending,
   };
 }

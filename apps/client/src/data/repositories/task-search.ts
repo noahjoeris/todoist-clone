@@ -103,6 +103,11 @@ export function recentSearchPreferenceId(
 
 const LIKE_ESCAPE_SQL = "ESCAPE '\\'";
 
+/** Local writes use `T`; PowerSync uses a space. Normalize before text DESC. */
+export function searchCreatedAtOrderSql(column: string): string {
+  return `replace(${column}, 'T', ' ') DESC`;
+}
+
 export function compileGuestSearchSql(
   query: Extract<ParsedSearchQuery, { status: 'ready' }>,
   limit: number,
@@ -139,7 +144,7 @@ export function compileAccountSearchSql(
            ${ranking.select} AS searchRank
          FROM tasks t
          WHERE t.user_id = ? AND t.completed_at IS NULL AND ${keywords.sql}
-         ORDER BY searchRank ASC, t.created_at DESC, t.id DESC
+         ORDER BY searchRank ASC, ${searchCreatedAtOrderSql('t.created_at')}, t.id DESC
          LIMIT ?
        )
        SELECT m.id, m.title, m.description, m.priority,
@@ -152,7 +157,7 @@ export function compileAccountSearchSql(
        LEFT JOIN projects p ON p.id = m.projectId AND p.user_id = ?
        LEFT JOIN task_labels tl ON tl.task_id = m.id AND tl.user_id = ?
        LEFT JOIN labels l ON l.id = tl.label_id AND l.user_id = ?
-       ORDER BY m.searchRank ASC, m.createdAt DESC, m.id DESC, lower(l.name) ASC, l.id ASC`,
+       ORDER BY m.searchRank ASC, ${searchCreatedAtOrderSql('m.createdAt')}, m.id DESC, lower(l.name) ASC, l.id ASC`,
     parameters: [
       ...ranking.parameters,
       userId,

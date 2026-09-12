@@ -39,7 +39,9 @@ Guests and signed-in users can search without a network connection.
 
 ## Results
 
-Rank, then `created_at DESC, id DESC`:
+Rank, then `created_at DESC, id DESC`. Account hits normalize PowerSync's
+space-separated timestamptz (`YYYY-MM-DD hh:mm:ss.sssZ`) and local RFC 3339
+(`T`) before that clock comparison, so mixed local/synced rows order by time:
 
 1. Exact title match (ASCII case-insensitive, no extra characters)
 2. Title starts with the complete normalized query
@@ -65,7 +67,7 @@ unavailable — it is not recreated as a blank draft.
 - Deduplicated with the same whitespace normalization and ASCII case folding;
   the latest typed casing is kept and moved to the front.
 - Individual **Remove** and **Clear all**. Malformed stored JSON is treated as
-  empty.
+  empty. A failed recents write is reported in Search.
 - Guest history and each account's history are separate
   (`search-recents:guest` vs `search-recents:user:<userId>`). They do not sync,
   upload, or copy with guest-task adoption. Switching identity clears the open

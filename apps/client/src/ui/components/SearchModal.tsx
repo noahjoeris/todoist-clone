@@ -148,6 +148,13 @@ export function SearchModal({ session, onClose, onOpenTask, restoreFocus }: Sear
             <Text accessibilityLiveRegion="polite" style={styles.live}>
               {announcement}
             </Text>
+            {session.recentsWriteError && (
+              <View style={styles.writeFailure}>
+                <Text accessibilityRole="alert" style={styles.error}>
+                  Couldn’t update recent searches.
+                </Text>
+              </View>
+            )}
             <ScrollView
               keyboardShouldPersistTaps="handled"
               style={styles.body}
@@ -336,6 +343,7 @@ function SearchResultRow({
 function searchAnnouncement(session: SearchSession, blank: boolean): string {
   if (blank) {
     if (session.recentsError) return 'Couldn’t load recent searches.';
+    if (session.recentsWriteError) return 'Couldn’t update recent searches.';
     if (session.recents.length === 0) return 'No recent searches.';
     return `${session.recents.length} recent ${session.recents.length === 1 ? 'search' : 'searches'}.`;
   }
@@ -381,6 +389,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   live: { color: colors.muted, fontSize: 13, paddingHorizontal: 16, paddingVertical: 8 },
+  writeFailure: { paddingHorizontal: 16, paddingBottom: 8 },
   body: { flex: 1 },
   bodyContent: { padding: 16, paddingBottom: 32, gap: 16 },
   section: { gap: 8 },

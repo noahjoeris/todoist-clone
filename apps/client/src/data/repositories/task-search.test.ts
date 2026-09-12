@@ -13,6 +13,7 @@ import {
   recentSearchPreferenceId,
   recordRecentSearch,
   removeRecentSearch,
+  searchCreatedAtOrderSql,
   searchQueryIdentity,
 } from './task-search';
 
@@ -76,6 +77,19 @@ describe('LIKE escaping', () => {
     expect(account.sql).toContain('t.user_id = ?');
     expect(account.sql).toContain('t.completed_at IS NULL');
     expect(account.parameters[account.parameters.length - 3]).toBe('user-1');
+  });
+});
+
+describe('account created_at ordering', () => {
+  it('normalizes RFC 3339 T and PowerSync space separators before DESC', () => {
+    expect(searchCreatedAtOrderSql('t.created_at')).toBe("replace(t.created_at, 'T', ' ') DESC");
+    const parsed = parseSearchQuery('milk');
+    if (parsed.status !== 'ready') throw new Error('expected ready');
+    const account = compileAccountSearchSql(parsed, 'user-1', 50);
+    expect(account.sql).toContain(searchCreatedAtOrderSql('t.created_at'));
+    expect(account.sql).toContain(searchCreatedAtOrderSql('m.createdAt'));
+    expect(account.sql).not.toMatch(/ORDER BY searchRank ASC, t\.created_at DESC/);
+    expect(account.sql).not.toMatch(/ORDER BY m\.searchRank ASC, m\.createdAt DESC/);
   });
 });
 
