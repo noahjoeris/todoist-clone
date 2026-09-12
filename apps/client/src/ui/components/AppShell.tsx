@@ -12,6 +12,7 @@ interface AppShellProps {
   onCloseDrawer: () => void;
   onCloseFinished: (generation: number) => void;
   menuButtonRef: RefObject<View | null>;
+  restoreFocus?: () => void;
 }
 
 export function AppShell({
@@ -22,11 +23,16 @@ export function AppShell({
   onCloseDrawer,
   onCloseFinished,
   menuButtonRef,
+  restoreFocus: restoreFocusOverride,
 }: AppShellProps) {
   const restoreFocus = useCallback(() => {
+    if (restoreFocusOverride) {
+      restoreFocusOverride();
+      return;
+    }
     const node = menuButtonRef.current as (View & { focus?: () => void }) | null;
     node?.focus?.();
-  }, [menuButtonRef]);
+  }, [menuButtonRef, restoreFocusOverride]);
 
   return (
     <View style={styles.shell}>

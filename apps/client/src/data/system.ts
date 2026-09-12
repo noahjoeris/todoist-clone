@@ -8,10 +8,12 @@ import {
   createGuestTaskAdoptionRepository,
   createLabelRepositories,
   createProjectRepositories,
+  createRecentSearchRepositories,
   createTaskRepositories,
   type GuestTaskAdoptionRepository,
   type LabelRepositories,
   type ProjectRepositories,
+  type RecentSearchRepositories,
   type SyncStatusSource,
   type TaskRepositories,
 } from './repositories';
@@ -41,6 +43,7 @@ export interface DataSystem {
   labels: LabelRepositories;
   projects: ProjectRepositories;
   guestTaskAdoption: GuestTaskAdoptionRepository;
+  searchRecents: RecentSearchRepositories;
   auth: AuthAvailability;
   sync?: SyncStatusSource;
   dispose(): void;
@@ -61,6 +64,7 @@ export function createDataSystem(): DataSystem {
   const labels = createLabelRepositories(powersync, randomUUID);
   const projects = createProjectRepositories(powersync, randomUUID);
   const guestTaskAdoption = createGuestTaskAdoptionRepository(powersync);
+  const searchRecents = createRecentSearchRepositories(powersync);
   const cloud = createCloudServices(powersync, guestTaskAdoption);
   return {
     powersync,
@@ -68,6 +72,7 @@ export function createDataSystem(): DataSystem {
     labels,
     projects,
     guestTaskAdoption,
+    searchRecents,
     auth: cloud.auth,
     ...(cloud.sync ? { sync: cloud.sync } : {}),
     dispose: cloud.dispose,

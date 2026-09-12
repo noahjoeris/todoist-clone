@@ -5,6 +5,8 @@ import {
   type GuestTaskAdoptionRepository,
   type LabelRepositories,
   type ProjectRepositories,
+  type RecentSearchRepositories,
+  type RecentSearchRepository,
   type SyncStatusSource,
   type TaskRepositories,
   type TaskRepository,
@@ -37,11 +39,18 @@ import { UpdatePasswordScreen } from './screens/UpdatePasswordScreen';
 export function RootScreen({ system }: { system: DataSystem }) {
   switch (system.auth.status) {
     case 'unconfigured':
-      return <GuestHome repository={system.tasks.guest} account={{ kind: 'hidden' }} />;
+      return (
+        <GuestHome
+          repository={system.tasks.guest}
+          recents={system.searchRecents.guest}
+          account={{ kind: 'hidden' }}
+        />
+      );
     case 'misconfigured':
       return (
         <GuestHome
           repository={system.tasks.guest}
+          recents={system.searchRecents.guest}
           account={{ kind: 'unavailable', message: system.auth.error.message }}
         />
       );
@@ -55,6 +64,7 @@ export function RootScreen({ system }: { system: DataSystem }) {
           tasks={system.tasks}
           labels={system.labels}
           projects={system.projects}
+          searchRecents={system.searchRecents}
           auth={system.auth.repository}
           sync={sync}
           guestTaskAdoption={system.guestTaskAdoption}
@@ -77,6 +87,7 @@ function AccountAwareScreen({
   tasks,
   labels,
   projects,
+  searchRecents,
   auth,
   sync,
   guestTaskAdoption,
@@ -84,6 +95,7 @@ function AccountAwareScreen({
   tasks: TaskRepositories;
   labels: LabelRepositories;
   projects: ProjectRepositories;
+  searchRecents: RecentSearchRepositories;
   auth: AuthRepository;
   sync: SyncStatusSource;
   guestTaskAdoption: GuestTaskAdoptionRepository;
@@ -181,6 +193,7 @@ function AccountAwareScreen({
         <HomeScreen
           key={identityKey}
           repository={userTasks}
+          recents={searchRecents.forUser(authState.user.id)}
           pane={pane}
           onPaneChange={setPane}
           upcomingDays={upcomingDays}
@@ -208,6 +221,7 @@ function AccountAwareScreen({
         <HomeScreen
           key={identityKey}
           repository={tasks.guest}
+          recents={searchRecents.guest}
           pane={pane}
           onPaneChange={setPane}
           upcomingDays={upcomingDays}
@@ -258,6 +272,7 @@ function AccountAwareScreen({
         <HomeScreen
           key={identityKey}
           repository={tasks.guest}
+          recents={searchRecents.guest}
           pane={pane}
           onPaneChange={setPane}
           upcomingDays={upcomingDays}
@@ -268,12 +283,21 @@ function AccountAwareScreen({
   }
 }
 
-function GuestHome({ repository, account }: { repository: TaskRepository; account: AccountEntry }) {
+function GuestHome({
+  repository,
+  recents,
+  account,
+}: {
+  repository: TaskRepository;
+  recents: RecentSearchRepository;
+  account: AccountEntry;
+}) {
   const [pane, setPane] = useState<HomePane>({ type: 'inbox' });
   const [upcomingDays, setUpcomingDays] = useState(UPCOMING_PAGE_DAYS);
   return (
     <HomeScreen
       repository={repository}
+      recents={recents}
       account={account}
       pane={pane}
       onPaneChange={setPane}

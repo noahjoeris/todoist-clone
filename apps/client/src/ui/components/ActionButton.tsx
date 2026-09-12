@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { forwardRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, type View } from 'react-native';
 import { colors } from '../theme';
 
 interface ActionButtonProps {
@@ -12,18 +12,22 @@ interface ActionButtonProps {
   color?: string;
 }
 
-export function ActionButton({
-  label,
-  accessibilityLabel,
-  onPress,
-  disabled = false,
-  selected = false,
-  accent = false,
-  color = colors.text,
-}: ActionButtonProps) {
+export const ActionButton = forwardRef<View, ActionButtonProps>(function ActionButton(
+  {
+    label,
+    accessibilityLabel,
+    onPress,
+    disabled = false,
+    selected = false,
+    accent = false,
+    color = colors.text,
+  },
+  ref,
+) {
   const [hovered, setHovered] = useState(false);
   return (
     <Pressable
+      ref={ref}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ disabled, selected }}
@@ -41,7 +45,7 @@ export function ActionButton({
       <Text style={[styles.label, { color: accent ? '#ffffff' : color }]}>{label}</Text>
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   button: {

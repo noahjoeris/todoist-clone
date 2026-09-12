@@ -1423,3 +1423,353 @@ describe('account-owned task projects', () => {
     ]);
   });
 });
+
+describe('guest task keyword search', () => {
+  let sqlite: DatabaseSync;
+  let directory: string;
+  const execute =
+    vi.fn<(sql: string, parameters?: SQLInputValue[]) => Promise<QueryResult<never>>>();
+  const watch = vi.fn<CommonPowerSyncDatabase['watchWithCallback']>();
+  const writeTransaction = vi.fn();
+  const repository = createTaskRepository(
+    { execute, watchWithCallback: watch, writeTransaction },
+    randomUUID,
+  );
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    directory = mkdtempSync(join(tmpdir(), 'todoist-guest-search-'));
+    sqlite = new DatabaseSync(join(directory, 'tasks.sqlite'));
+    sqlite.exec(`CREATE TABLE local_tasks (
+      id TEXT PRIMARY KEY, title TEXT, description TEXT, priority INTEGER,
+      scheduled_date TEXT, scheduled_time TEXT, completed_at TEXT, created_at TEXT
+    )`);
+    bindSqlite(sqlite, execute, writeTransaction);
+    bindWatch(sqlite, watch);
+  });
+
+  afterEach(() => {
+    sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  function insert(row: {
+    id: string;
+    title: string;
+    description?: string | null;
+    completedAt?: string | null;
+    createdAt?: string;
+  }) {
+    sqlite
+      .prepare(
+        `INSERT INTO local_tasks
+          (id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at)
+         VALUES (?, ?, ?, 4, NULL, NULL, ?, ?)`,
+      )
+      .run(
+        row.id,
+        row.title,
+        row.description === undefined ? '' : row.description,
+        row.completedAt ?? null,
+        row.createdAt ?? '2026-09-10T08:00:00.000Z',
+      );
+  }
+
+  function search(query: string, limit = 50) {
+    const onResults = vi.fn();
+    const onError = vi.fn();
+    const stop = repository.subscribeSearch({ query, limit }, onResults, onError);
+    return { onResults, onError, stop, snapshot: onResults.mock.calls[0]?.[0] };
+  }
+
+  it('returns an empty snapshot for blank queries without watching tasks', () => {
+    insert({ id: 't1', title: 'Buy milk' });
+    const { onResults, stop } = search('   ');
+    expect(onResults.mock.calls[0]?.[0]).toEqual({ tasks: [], hasMore: false });
+    expect(watch).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('errors on queries longer than 200 characters', () => {
+    const { onResults, onError } = search('x'.repeat(201));
+    expect(onResults).not.toHaveBeenCalled();
+    expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+    expect(watch).not.toHaveBeenCalled();
+  });
+
+  it('requires every word as a literal substring across title and description', () => {
+    insert({ id: 'both', title: 'Buy eggs', description: 'from the milk shop' });
+    insert({ id: 'title', title: 'Buy milk', description: '' });
+    insert({ id: 'none', title: 'Walk dog', description: 'park' });
+    insert({
+      id: 'done',
+      title: 'Buy milk',
+      description: 'done',
+      completedAt: '2026-09-11T10:00:00.000Z',
+    });
+    const { snapshot } = search('buy milk');
+    expect(snapshot.tasks.map((task: { id: string }) => task.id)).toEqual(['title', 'both']);
+  });
+
+  it('keeps punctuation, wildcards, and operators literal', () => {
+    insert({ id: 'pct', title: 'Save 50% today' });
+    insert({ id: 'under', title: 'file_name' });
+    insert({ id: 'slash', title: 'path\\to' });
+    insert({ id: 'quote', title: 'say "hello"' });
+    insert({ id: 'hash', title: 'tag #inbox & more' });
+    expect(search('50%').snapshot.tasks.map((task: { id: string }) => task.id)).toEqual(['pct']);
+    expect(search('file_name').snapshot.tasks.map((task: { id: string }) => task.id)).toEqual([
+      'under',
+    ]);
+    expect(search('path\\to').snapshot.tasks.map((task: { id: string }) => task.id)).toEqual([
+      'slash',
+    ]);
+    expect(search('"hello"').snapshot.tasks.map((task: { id: string }) => task.id)).toEqual([
+      'quote',
+    ]);
+    expect(search('#inbox &').snapshot.tasks.map((task: { id: string }) => task.id)).toEqual([
+      'hash',
+    ]);
+    expect(search('today').snapshot.tasks.map((task: { id: string }) => task.id)).toEqual(['pct']);
+    expect(search('search:').snapshot.tasks).toEqual([]);
+  });
+
+  it('matches ASCII case-insensitively and leaves non-ASCII case significant', () => {
+    insert({ id: 'ascii', title: 'Buy Milk' });
+    insert({ id: 'cafe', title: 'Café' });
+    expect(search('buy milk').snapshot.tasks.map((task: { id: string }) => task.id)).toEqual([
+      'ascii',
+    ]);
+    expect(search('café').snapshot.tasks.map((task: { id: string }) => task.id)).toEqual(['cafe']);
+    expect(search('CAFÉ').snapshot.tasks).toEqual([]);
+  });
+
+  it('ranks exact title, then prefix, then all title words, then description, with created_at ties', () => {
+    insert({
+      id: 'desc',
+      title: 'Other',
+      description: 'buy milk',
+      createdAt: '2026-09-12T10:00:00.000Z',
+    });
+    insert({
+      id: 'words',
+      title: 'milk then buy',
+      createdAt: '2026-09-12T10:00:00.000Z',
+    });
+    insert({
+      id: 'prefix',
+      title: 'buy milk now',
+      createdAt: '2026-09-12T10:00:00.000Z',
+    });
+    insert({
+      id: 'exact-old',
+      title: 'buy milk',
+      createdAt: '2026-09-11T10:00:00.000Z',
+    });
+    insert({
+      id: 'exact-new',
+      title: 'buy milk',
+      createdAt: '2026-09-12T10:00:00.000Z',
+    });
+    expect(search('buy milk').snapshot.tasks.map((task: { id: string }) => task.id)).toEqual([
+      'exact-new',
+      'exact-old',
+      'prefix',
+      'words',
+      'desc',
+    ]);
+  });
+
+  it('pages unique tasks in rank order and treats null descriptions as empty', () => {
+    insert({ id: 'null-desc', title: 'Notebook', description: null });
+    expect(search('notebook').snapshot.tasks.map((task: { id: string }) => task.id)).toEqual([
+      'null-desc',
+    ]);
+    expect(search('missing-word').snapshot.tasks).toEqual([]);
+
+    for (let index = 0; index < 55; index += 1) {
+      const suffix = String(index).padStart(2, '0');
+      insert({
+        id: `page-${suffix}`,
+        title: `Match ${suffix}`,
+        createdAt: `2026-09-10T08:00:${suffix}.000Z`,
+      });
+    }
+    const first = search('Match', 50);
+    expect(first.snapshot.tasks).toHaveLength(50);
+    expect(first.snapshot.hasMore).toBe(true);
+    const second = search('Match', 100);
+    expect(second.snapshot.tasks).toHaveLength(55);
+    expect(second.snapshot.hasMore).toBe(false);
+    expect(new Set(second.snapshot.tasks.map((task: { id: string }) => task.id)).size).toBe(55);
+  });
+
+  it('ignores results after unsubscribe', () => {
+    insert({ id: 't1', title: 'Buy milk' });
+    const { stop, onResults } = search('milk');
+    const handler = watch.mock.calls[0]?.[2];
+    const options = watch.mock.calls[0]?.[3];
+    stop();
+    expect(options?.signal?.aborted).toBe(true);
+    handler?.onResult?.({
+      array: [{ id: 'stale', title: 'stale' }],
+      *[Symbol.iterator]() {
+        yield* [];
+        return undefined;
+      },
+    });
+    expect(onResults).toHaveBeenCalledOnce();
+  });
+});
+
+describe('account task keyword search', () => {
+  const USER_A = '11111111-1111-4111-8111-111111111111';
+  const USER_B = '22222222-2222-4222-8222-222222222222';
+  const PROJECT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let sqlite: DatabaseSync;
+  let directory: string;
+  const execute =
+    vi.fn<(sql: string, parameters?: SQLInputValue[]) => Promise<QueryResult<never>>>();
+  const watch = vi.fn<CommonPowerSyncDatabase['watchWithCallback']>();
+  const writeTransaction = vi.fn();
+  const repositories = createTaskRepositories(
+    { execute, watchWithCallback: watch, writeTransaction },
+    randomUUID,
+  );
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    directory = mkdtempSync(join(tmpdir(), 'todoist-account-search-'));
+    sqlite = new DatabaseSync(join(directory, 'tasks.sqlite'));
+    createAccountTables(sqlite);
+    sqlite
+      .prepare(
+        `INSERT INTO projects (id, user_id, name, color, is_favorite, sort_order, is_archived, created_at, updated_at)
+         VALUES (?, ?, 'Work', 'charcoal', 0, 0, 0, '2026-09-10T08:00:00.000Z', '2026-09-10T08:00:00.000Z')`,
+      )
+      .run(PROJECT, USER_A);
+    bindSqlite(sqlite, execute, writeTransaction);
+    bindWatch(sqlite, watch);
+  });
+
+  afterEach(() => {
+    sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  function insertTask(row: {
+    id: string;
+    userId: string;
+    title: string;
+    description?: string;
+    completedAt?: string | null;
+    createdAt?: string;
+    projectId?: string | null;
+  }) {
+    sqlite
+      .prepare(
+        `INSERT INTO tasks
+          (id, user_id, project_id, title, description, priority, scheduled_date, scheduled_time,
+           completed_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 4, NULL, NULL, ?, ?, ?)`,
+      )
+      .run(
+        row.id,
+        row.userId,
+        row.projectId ?? null,
+        row.title,
+        row.description ?? '',
+        row.completedAt ?? null,
+        row.createdAt ?? '2026-09-10T08:00:00.000Z',
+        row.createdAt ?? '2026-09-10T08:00:00.000Z',
+      );
+  }
+
+  it('scopes results to the owner and excludes completed and guest-only rows', async () => {
+    sqlite.exec(`CREATE TABLE local_tasks (
+      id TEXT PRIMARY KEY, title TEXT, description TEXT, priority INTEGER,
+      scheduled_date TEXT, scheduled_time TEXT, completed_at TEXT, created_at TEXT
+    )`);
+    sqlite
+      .prepare(
+        `INSERT INTO local_tasks (id, title, description, priority, scheduled_date, scheduled_time, completed_at, created_at)
+         VALUES ('guest', 'Buy milk', '', 4, NULL, NULL, NULL, '2026-09-10T08:00:00.000Z')`,
+      )
+      .run();
+    insertTask({ id: 'a1', userId: USER_A, title: 'Buy milk' });
+    insertTask({
+      id: 'a-done',
+      userId: USER_A,
+      title: 'Buy milk',
+      completedAt: '2026-09-11T10:00:00.000Z',
+    });
+    insertTask({ id: 'b1', userId: USER_B, title: 'Buy milk' });
+    insertTask({
+      id: 'a-proj',
+      userId: USER_A,
+      title: 'Buy oat milk',
+      projectId: PROJECT,
+    });
+
+    const onA = vi.fn();
+    repositories.forUser(USER_A).subscribeSearch({ query: 'buy milk' }, onA, vi.fn());
+    expect(onA.mock.calls[0]?.[0].tasks.map((task: { id: string }) => task.id)).toEqual([
+      'a1',
+      'a-proj',
+    ]);
+
+    const onB = vi.fn();
+    repositories.forUser(USER_B).subscribeSearch({ query: 'buy milk' }, onB, vi.fn());
+    expect(onB.mock.calls[0]?.[0].tasks.map((task: { id: string }) => task.id)).toEqual(['b1']);
+  });
+
+  it('hydrates all labels after ranking and does not let joins consume the task limit', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO labels (id, user_id, name, color, is_favorite, created_at, updated_at)
+         VALUES (?, ?, ?, 'charcoal', 0, '2026-09-10T08:00:00.000Z', '2026-09-10T08:00:00.000Z')`,
+      )
+      .run('lab-a', USER_A, 'Alpha');
+    sqlite
+      .prepare(
+        `INSERT INTO labels (id, user_id, name, color, is_favorite, created_at, updated_at)
+         VALUES (?, ?, ?, 'red', 0, '2026-09-10T08:00:00.000Z', '2026-09-10T08:00:00.000Z')`,
+      )
+      .run('lab-b', USER_A, 'Beta');
+
+    for (let index = 0; index < 3; index += 1) {
+      const id = `t${index}`;
+      insertTask({
+        id,
+        userId: USER_A,
+        title: `Match ${index}`,
+        createdAt: `2026-09-10T08:00:0${index}.000Z`,
+      });
+      sqlite
+        .prepare(
+          `INSERT INTO task_labels (id, user_id, task_id, label_id, created_at)
+           VALUES (?, ?, ?, 'lab-a', '2026-09-10T08:00:00.000Z')`,
+        )
+        .run(`${id}-a`, USER_A, id);
+      sqlite
+        .prepare(
+          `INSERT INTO task_labels (id, user_id, task_id, label_id, created_at)
+           VALUES (?, ?, ?, 'lab-b', '2026-09-10T08:00:00.000Z')`,
+        )
+        .run(`${id}-b`, USER_A, id);
+    }
+
+    const onResults = vi.fn();
+    repositories.forUser(USER_A).subscribeSearch({ query: 'Match', limit: 2 }, onResults, vi.fn());
+    const snapshot = onResults.mock.calls[0]?.[0];
+    expect(snapshot.tasks).toHaveLength(2);
+    expect(snapshot.hasMore).toBe(true);
+    expect(snapshot.tasks[0].labels.map((label: { name: string }) => label.name)).toEqual([
+      'Alpha',
+      'Beta',
+    ]);
+    expect(watch.mock.calls[0]?.[3]).toMatchObject({
+      tables: ['tasks', 'labels', 'task_labels', 'projects'],
+    });
+  });
+});

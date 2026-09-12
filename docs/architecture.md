@@ -559,6 +559,35 @@ decision.
   list-order conflict resolution. Duplicate-name races across offline devices
   still discard the whole upload batch (400 → `complete()`, ADR-014 / ADR-019).
 
+### ADR-022 Device-local task keyword search and recent queries
+
+Users need to find a task by title or description without browsing Inbox, Today,
+Upcoming, or a label/project view. Search is a client-only overlay over the
+current identity's local SQLite snapshot.
+
+- **Boundary.** `TaskRepository.subscribeSearch` and
+  `RecentSearchRepository` own SQL, PowerSync watches, ranking, and
+  `local_preferences` writes. UI (`SearchModal`, HomeScreen, Sidebar) never
+  imports SQL or PowerSync. Helpers beside the task repository parse the query,
+  escape `LIKE` wildcards, and define recent-query identity.
+- **Scope.** Guests search `local_tasks`. Signed-in users search `tasks` with
+  `user_id = ?`. Completed rows are excluded. Unadopted guest tasks stay hidden
+  while signed in. Labels are displayed on account hits but are not searchable
+  entities. There is no server search endpoint, Sync Stream, FTS index, or
+  filter-language parser.
+- **Matching.** Trim, split on whitespace, AND every word as a literal
+  substring of title or description (`LIKE` with an explicit `ESCAPE`). SQLite
+  ASCII case-insensitivity only. Punctuation including `%`, `_`, `*`,
+  backslashes, quotes, `#`, and `&` is literal. Input is capped at 200
+  characters.
+- **Recents.** JSON string arrays in `local_preferences`, keyed
+  `search-recents:guest` and `search-recents:user:<userId>`. They survive
+  `disconnectAndClear({ clearLocal: false })`, never enter `ps_crud` or guest
+  adoption, and are not shared across identities. Writes use
+  `INSERT OR REPLACE` because PowerSync tables are views.
+
+Product matching rules, shortcuts, and limitations: `docs/search.md`.
+
 ## Deferred
 
 Tauri desktop wrapper, pg-boss background jobs and the worker container (same API image,

@@ -27,8 +27,10 @@ compose.local.yaml      Local overlays (ES256 JWT on auth, PowerSync) + API
 
 The client currently supports local guest tasks (title, description, priority, date and optional
 time) in Inbox, Today, and Upcoming: complete and reopen from the checkbox, edit from the task,
-quick reschedule (Today / Tomorrow / Choose date / No date), and delete with an 8-second Undo.
-Completed tasks sit in a collapsed section that follows the current view. A persistent sidebar
+quick reschedule (Today / Tomorrow / Choose date / No date), delete with an 8-second Undo, and
+keyword Search over active titles and descriptions (sidebar action, web `/`, recent queries
+stored on-device per identity). Completed tasks sit in a collapsed section that follows the
+current view. A persistent sidebar
 appears from 900 logical pixels; narrower screens use a menu and overlay drawer. Email/password
 accounts with email-link confirmation, password reset, email change, and persistent sessions are
 available when cloud env is set. Guest tasks stay on the device and are hidden while signed
@@ -44,6 +46,7 @@ offline, pick a project from a searchable Inbox-inclusive picker, and open a pro
 task list. Guest-only use needs no `.env`: run `pnpm install`,
 `pnpm build`, then `pnpm --filter @todoist-clone/client web` (or a native development build).
 View membership, ordering, and create defaults: [docs/task-views.md](docs/task-views.md).
+Keyword search, ranking, recents, and local-snapshot limits: [docs/search.md](docs/search.md).
 
 This project is pre-release: schema changes replace the initial Drizzle migration in place.
 Reset local SQLite (reinstall / clear site data) and re-run `pnpm db:migrate` against a

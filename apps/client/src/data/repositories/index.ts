@@ -76,6 +76,12 @@ export {
   type ProjectRepositories,
   type ProjectRepository,
 } from './project-repository';
+export {
+  createRecentSearchRepositories,
+  createRecentSearchRepository,
+  type RecentSearchRepositories,
+  type RecentSearchRepository,
+} from './recent-search-repository';
 export type { ClientSyncStatus, SyncStatusSource } from './sync';
 export {
   projectIdForSubmit,
@@ -93,7 +99,16 @@ export {
   createTaskRepository,
   type TaskRepositories,
   type TaskRepository,
+  type TaskSearchQuery,
+  type TaskSearchSnapshot,
 } from './task-repository';
+export {
+  MAX_RECENT_SEARCHES,
+  MAX_SEARCH_QUERY_LENGTH,
+  parseSearchQuery,
+  SEARCH_PAGE_SIZE,
+  SEARCH_TOP_COUNT,
+} from './task-search';
 export {
   type TaskActiveCounts,
   type TaskCompletionSelection,
