@@ -430,20 +430,18 @@ describe('auth repository', () => {
 
       await repository.requestPasswordReset('  Ada@Example.COM ');
 
-      expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('ada@example.com', {});
+      expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('ada@example.com', {
+        redirectTo: EMAIL_CONFIRMATION_REDIRECT_TO,
+      });
     });
 
-    it('passes redirectTo when the platform supplies a callback URL', async () => {
+    it('omits redirectTo when the platform does not supply a callback URL', async () => {
       auth.resetPasswordForEmail.mockResolvedValue({ data: {}, error: null });
-      const repository = createAuthRepository(auth, registerLifecycle, {
-        emailRedirectTo: 'todoist-clone://auth/callback',
-      });
+      const repository = createAuthRepository(auth, registerLifecycle);
 
       await repository.requestPasswordReset('ada@example.com');
 
-      expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('ada@example.com', {
-        redirectTo: 'todoist-clone://auth/callback',
-      });
+      expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('ada@example.com', {});
     });
 
     it('validates the email before contacting Supabase', async () => {
