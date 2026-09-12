@@ -63,6 +63,8 @@ describe('auth repository', () => {
     signUp: vi.fn(),
     signInWithPassword: vi.fn(),
     resend: vi.fn(),
+    resetPasswordForEmail: vi.fn(),
+    updateUser: vi.fn(),
     signOut: vi.fn(),
     startAutoRefresh: vi.fn(),
     stopAutoRefresh: vi.fn(),
@@ -421,6 +423,129 @@ describe('auth repository', () => {
     });
   });
 
+  describe('password reset', () => {
+    it('emails a recovery link and normalises the address', async () => {
+      auth.resetPasswordForEmail.mockResolvedValue({ data: {}, error: null });
+      const repository = createRepository();
+
+      await repository.requestPasswordReset('  Ada@Example.COM ');
+
+      expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('ada@example.com', {
+        redirectTo: EMAIL_CONFIRMATION_REDIRECT_TO,
+      });
+    });
+
+    it('omits redirectTo when the platform does not supply a callback URL', async () => {
+      auth.resetPasswordForEmail.mockResolvedValue({ data: {}, error: null });
+      const repository = createAuthRepository(auth, registerLifecycle);
+
+      await repository.requestPasswordReset('ada@example.com');
+
+      expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('ada@example.com', {});
+    });
+
+    it('validates the email before contacting Supabase', async () => {
+      const repository = createRepository();
+      await expect(repository.requestPasswordReset('nope')).rejects.toMatchObject({
+        code: 'invalid-input',
+        message: 'Enter a valid email address.',
+      });
+      expect(auth.resetPasswordForEmail).not.toHaveBeenCalled();
+    });
+
+    it('maps rate limits', async () => {
+      auth.resetPasswordForEmail.mockResolvedValue({
+        data: {},
+        error: new AuthApiError('rate limit', 429, 'over_email_send_rate_limit'),
+      });
+      const repository = createRepository();
+      await expect(repository.requestPasswordReset('ada@example.com')).rejects.toMatchObject({
+        code: 'rate-limited',
+      });
+    });
+  });
+
+  describe('update password', () => {
+    it('saves the new password and clears a recovery flag', async () => {
+      auth.getSession.mockResolvedValue({ data: { session: session() }, error: null });
+      const repository = createAuthRepository(auth, registerLifecycle, {
+        passwordRecoveryFromUrl: true,
+      });
+      await repository.restoreSession();
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+        passwordRecovery: true,
+      });
+
+      auth.updateUser.mockResolvedValue({ data: { user: session().user }, error: null });
+      await repository.updatePassword('secret2');
+
+      expect(auth.updateUser).toHaveBeenCalledWith({ password: 'secret2' });
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+      });
+    });
+
+    it('validates the password before contacting Supabase', async () => {
+      const repository = await createSignedInRepository();
+      await expect(repository.updatePassword('short')).rejects.toMatchObject({
+        code: 'invalid-input',
+      });
+      expect(auth.updateUser).not.toHaveBeenCalled();
+    });
+
+    it('maps same_password', async () => {
+      const repository = await createSignedInRepository();
+      auth.updateUser.mockResolvedValue({
+        data: { user: null },
+        error: new AuthApiError('same password', 422, 'same_password'),
+      });
+      await expect(repository.updatePassword('secret1')).rejects.toMatchObject({
+        code: 'same-password',
+      });
+    });
+  });
+
+  describe('update email', () => {
+    it('requests a change and passes emailRedirectTo when provided', async () => {
+      const repository = createAuthRepository(auth, registerLifecycle, {
+        emailRedirectTo: 'todoist-clone://auth/callback',
+      });
+      auth.getSession.mockResolvedValue({ data: { session: session() }, error: null });
+      await repository.restoreSession();
+      auth.updateUser.mockResolvedValue({ data: { user: session().user }, error: null });
+
+      await repository.updateEmail('  New@Example.COM ');
+
+      expect(auth.updateUser).toHaveBeenCalledWith(
+        { email: 'new@example.com' },
+        { emailRedirectTo: 'todoist-clone://auth/callback' },
+      );
+    });
+
+    it('rejects the current address without contacting Supabase', async () => {
+      const repository = await createSignedInRepository();
+      await expect(repository.updateEmail('ada@example.com')).rejects.toMatchObject({
+        code: 'invalid-input',
+        message: 'Enter a different email address.',
+      });
+      expect(auth.updateUser).not.toHaveBeenCalled();
+    });
+
+    it('maps a taken address', async () => {
+      const repository = await createSignedInRepository();
+      auth.updateUser.mockResolvedValue({
+        data: { user: null },
+        error: new AuthApiError('already exists', 422, 'email_exists'),
+      });
+      await expect(repository.updateEmail('taken@example.com')).rejects.toMatchObject({
+        code: 'email-taken',
+      });
+    });
+  });
+
   describe('sign out', () => {
     it('ends only the local session and returns to guest mode', async () => {
       const repository = await createSignedInRepository();
@@ -456,6 +581,72 @@ describe('auth repository', () => {
 
       emitAuthEvent('SIGNED_OUT', null);
       expect(repository.getState()).toEqual({ status: 'signed-out' });
+    });
+
+    it('marks a PASSWORD_RECOVERY session so the UI can collect a new password', async () => {
+      const repository = await createSignedInRepository();
+
+      emitAuthEvent('PASSWORD_RECOVERY', session());
+
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+        passwordRecovery: true,
+      });
+    });
+
+    it('keeps passwordRecovery across token refreshes until the password is updated', async () => {
+      auth.getSession.mockResolvedValue({ data: { session: session() }, error: null });
+      const repository = createAuthRepository(auth, registerLifecycle, {
+        passwordRecoveryFromUrl: true,
+      });
+      await repository.restoreSession();
+
+      emitAuthEvent('TOKEN_REFRESHED', session({ email: 'ada@example.com' }));
+      expect(repository.getState()).toMatchObject({ passwordRecovery: true });
+
+      auth.updateUser.mockResolvedValue({ data: { user: session().user }, error: null });
+      await repository.updatePassword('secret2');
+      emitAuthEvent('USER_UPDATED', session());
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+      });
+    });
+
+    it('does not treat a later sign-in as recovery when the URL type had no session', async () => {
+      auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+      const repository = createAuthRepository(auth, registerLifecycle, {
+        passwordRecoveryFromUrl: true,
+      });
+      await repository.restoreSession();
+      expect(repository.getState()).toEqual({ status: 'signed-out' });
+
+      auth.signInWithPassword.mockResolvedValue({ data: { session: session() }, error: null });
+      await repository.signIn(credentials);
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+      });
+    });
+
+    it('stashes PASSWORD_RECOVERY during restore and applies it with the session', async () => {
+      const pending = deferred<{ data: { session: Session | null }; error: null }>();
+      auth.getSession.mockReturnValue(pending.promise);
+      const repository = createRepository();
+      const restoration = repository.restoreSession();
+
+      emitAuthEvent('PASSWORD_RECOVERY', session());
+      expect(repository.getState()).toEqual({ status: 'restoring' });
+
+      pending.resolve({ data: { session: session() }, error: null });
+      await restoration;
+
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+        passwordRecovery: true,
+      });
     });
 
     it('leaves startup to restoreSession', async () => {
@@ -652,6 +843,72 @@ describe('auth repository', () => {
 
       await repository.signUp(credentials);
       expect(auth.signUp).toHaveBeenCalledWith(credentials);
+    });
+  });
+
+  describe('recovery deep link', () => {
+    it('keeps passwordRecovery after a cold-start PKCE exchange that emits PASSWORD_RECOVERY', async () => {
+      const pendingRestore = deferred<{ data: { session: Session | null }; error: null }>();
+      const pendingExchange = deferred<{ data: { session: Session | null }; error: null }>();
+      auth.getSession.mockReturnValue(pendingRestore.promise);
+      auth.exchangeCodeForSession.mockImplementation(() => {
+        emitAuthEvent('PASSWORD_RECOVERY', session());
+        return pendingExchange.promise;
+      });
+      const repository = createRepository();
+      const restoration = repository.restoreSession();
+
+      const apply = handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=pkce-recovery`);
+      expect(repository.getState().status).toBe('restoring');
+
+      pendingRestore.resolve({ data: { session: null }, error: null });
+      await restoration;
+      expect(repository.getState().status).toBe('restoring');
+
+      pendingExchange.resolve({ data: { session: session() }, error: null });
+      await apply;
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+        passwordRecovery: true,
+      });
+    });
+
+    it('marks passwordRecovery from an implicit recovery callback URL type', async () => {
+      auth.setSession.mockResolvedValue({ data: { session: session() }, error: null });
+      const repository = createRepository();
+
+      await handleDeepLink(
+        `${EMAIL_CONFIRMATION_REDIRECT_TO}#access_token=at&refresh_token=rt&type=recovery`,
+      );
+
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+        passwordRecovery: true,
+      });
+    });
+
+    it('applies passwordRecovery from a recovery deep link after continue-as-guest', async () => {
+      auth.getSession.mockResolvedValue({
+        data: { session: null },
+        error: new AuthRetryableFetchError('fetch failed', 0),
+      });
+      auth.exchangeCodeForSession.mockImplementation(async () => {
+        emitAuthEvent('PASSWORD_RECOVERY', session());
+        return { data: { session: session() }, error: null };
+      });
+      const repository = createRepository();
+      await repository.restoreSession();
+      repository.continueAsGuest();
+
+      await handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=pkce-recovery`);
+
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+        passwordRecovery: true,
+      });
     });
   });
 });

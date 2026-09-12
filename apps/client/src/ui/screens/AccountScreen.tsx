@@ -10,6 +10,8 @@ import { signOutAvailability, type UploadQueueCount } from './account-sign-out';
 interface AccountScreenProps {
   auth: AuthRepository;
   user: AuthUser;
+  onChangeEmail: () => void;
+  onChangePassword: () => void;
   onBack: () => void;
   sync: SyncStatusSource;
 }
@@ -20,7 +22,14 @@ interface AccountScreenProps {
  * Sign-out is blocked until the upload-queue size is known, and while uploads are
  * queued, so `disconnectAndClear` cannot discard unsynced account edits.
  */
-export function AccountScreen({ auth, user, onBack, sync }: AccountScreenProps) {
+export function AccountScreen({
+  auth,
+  user,
+  onChangeEmail,
+  onChangePassword,
+  onBack,
+  sync,
+}: AccountScreenProps) {
   const { pending, error, run } = useAuthAction();
   const availability = signOutAvailability(useUploadQueueCount(sync));
   const waiting = availability.action === 'wait';
@@ -44,6 +53,8 @@ export function AccountScreen({ auth, user, onBack, sync }: AccountScreenProps) 
       </Text>
       {error && <FormError message={error.message} />}
       <View style={styles.actions}>
+        <ActionButton label="Change email" disabled={pending} onPress={onChangeEmail} />
+        <ActionButton label="Change password" disabled={pending} onPress={onChangePassword} />
         <ActionButton
           label={signOutLabel}
           disabled={pending || waiting || checking}

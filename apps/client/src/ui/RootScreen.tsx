@@ -12,7 +12,9 @@ import { canWriteAccountTasks } from './account-write-ready';
 import { GuestTaskAdoptionBanner } from './components/GuestTaskAdoptionBanner';
 import { useAuthState } from './hooks/useAuthState';
 import { AccountScreen } from './screens/AccountScreen';
+import { ChangeEmailScreen } from './screens/ChangeEmailScreen';
 import { ConfirmEmailScreen } from './screens/ConfirmEmailScreen';
+import { ForgotPasswordScreen } from './screens/ForgotPasswordScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import {
   PreparingAccountScreen,
@@ -21,6 +23,7 @@ import {
 } from './screens/SessionRestoreScreen';
 import { SignInScreen } from './screens/SignInScreen';
 import { SignUpScreen } from './screens/SignUpScreen';
+import { UpdatePasswordScreen } from './screens/UpdatePasswordScreen';
 
 /**
  * Chooses between guest and account content. Without cloud configuration the app is
@@ -58,7 +61,10 @@ type AuthScreen =
   | { name: 'sign-in'; error?: AuthFailure }
   | { name: 'sign-up' }
   | { name: 'confirm'; email: string }
-  | { name: 'account' };
+  | { name: 'forgot-password'; email: string }
+  | { name: 'account' }
+  | { name: 'change-email' }
+  | { name: 'change-password' };
 
 function AccountAwareScreen({
   tasks,
@@ -108,6 +114,9 @@ function AccountAwareScreen({
         />
       );
     case 'signed-in':
+      if (authState.passwordRecovery) {
+        return <UpdatePasswordScreen auth={auth} mode="recovery" />;
+      }
       if (userTasks == null) return null;
       if (!localDataReady) return <PreparingAccountScreen />;
       if (screen?.name === 'account') {
@@ -115,8 +124,28 @@ function AccountAwareScreen({
           <AccountScreen
             auth={auth}
             user={authState.user}
+            onChangeEmail={() => setScreen({ name: 'change-email' })}
+            onChangePassword={() => setScreen({ name: 'change-password' })}
             onBack={() => setScreen(null)}
             sync={sync}
+          />
+        );
+      }
+      if (screen?.name === 'change-email') {
+        return (
+          <ChangeEmailScreen
+            auth={auth}
+            currentEmail={authState.user.email}
+            onBack={() => setScreen({ name: 'account' })}
+          />
+        );
+      }
+      if (screen?.name === 'change-password') {
+        return (
+          <UpdatePasswordScreen
+            auth={auth}
+            mode="change"
+            onBack={() => setScreen({ name: 'account' })}
           />
         );
       }
@@ -152,6 +181,7 @@ function AccountAwareScreen({
           auth={auth}
           onCreateAccount={() => setScreen({ name: 'sign-up' })}
           onConfirmEmail={(email) => setScreen({ name: 'confirm', email })}
+          onForgotPassword={(email) => setScreen({ name: 'forgot-password', email })}
           onCancel={() => setScreen(null)}
           {...(screen.error ? { initialError: screen.error } : {})}
         />
@@ -173,7 +203,17 @@ function AccountAwareScreen({
           onSignIn={() => setScreen({ name: 'sign-in' })}
         />
       );
+    case 'forgot-password':
+      return (
+        <ForgotPasswordScreen
+          auth={auth}
+          {...(screen.email !== '' ? { initialEmail: screen.email } : {})}
+          onBack={() => setScreen({ name: 'sign-in' })}
+        />
+      );
     case 'account':
+    case 'change-email':
+    case 'change-password':
       return (
         <HomeScreen
           repository={tasks.guest}

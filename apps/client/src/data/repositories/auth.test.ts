@@ -1,7 +1,7 @@
 import { AuthApiError, AuthRetryableFetchError } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { AuthFailure, credentialsSchema, toAuthFailure } from './auth';
+import { AuthFailure, credentialsSchema, emailSchema, passwordSchema, toAuthFailure } from './auth';
 import { AuthUrlError, parseAuthUrlError } from './auth-url';
 
 describe('credentialsSchema', () => {
@@ -19,6 +19,18 @@ describe('credentialsSchema', () => {
   });
 });
 
+describe('emailSchema and passwordSchema', () => {
+  it('normalises emails independently of a password', () => {
+    expect(emailSchema.parse('  Ada@Example.COM ')).toBe('ada@example.com');
+    expect(emailSchema.safeParse('not-an-email').success).toBe(false);
+  });
+
+  it('enforces the minimum password length', () => {
+    expect(passwordSchema.parse('secret1')).toBe('secret1');
+    expect(passwordSchema.safeParse('short').success).toBe(false);
+  });
+});
+
 describe('toAuthFailure', () => {
   it('passes AuthFailure through unchanged', () => {
     const failure = new AuthFailure('email-taken');
@@ -30,8 +42,12 @@ describe('toAuthFailure', () => {
       ['invalid_credentials', 'invalid-credentials'],
       ['email_not_confirmed', 'email-not-confirmed'],
       ['user_already_exists', 'email-taken'],
+      ['email_exists', 'email-taken'],
       ['otp_expired', 'otp-expired'],
       ['otp-expired', 'otp-expired'],
+      ['session_expired', 'session-expired'],
+      ['session_not_found', 'session-expired'],
+      ['reauthentication_needed', 'reauthentication-needed'],
       ['over_email_send_rate_limit', 'rate-limited'],
     ];
     for (const [supabaseCode, expected] of cases) {
@@ -47,6 +63,16 @@ describe('toAuthFailure', () => {
     );
     expect(weak.code).toBe('weak-password');
     expect(weak.message).toBe('Password should be at least 6 characters.');
+
+    const same = toAuthFailure(
+      new AuthApiError(
+        'New password should be different from the old password.',
+        422,
+        'same_password',
+      ),
+    );
+    expect(same.code).toBe('same-password');
+    expect(same.message).toBe('New password should be different from the old password.');
   });
 
   it('uses the first Zod issue as the message', () => {

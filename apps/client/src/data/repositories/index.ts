@@ -15,7 +15,9 @@ export {
   type AuthUser,
   type Credentials,
   credentialsSchema,
+  emailSchema,
   MIN_PASSWORD_LENGTH,
+  passwordSchema,
 } from './auth';
 export {
   type AuthRepository,

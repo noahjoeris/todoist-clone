@@ -20,8 +20,8 @@ services:
   auth:
     environment:
       GOTRUE_JWT_KEYS: ${JWT_KEYS:-[]}
-      # Native confirmation emails redirect to the app scheme. ADDITIONAL_REDIRECT_URLS
-      # from infra/supabase/.env is appended when set (comma-separated).
+      # Native confirmation / recovery / email-change emails redirect to the app scheme.
+      # ADDITIONAL_REDIRECT_URLS from infra/supabase/.env is appended when set (comma-separated).
       GOTRUE_URI_ALLOW_LIST: todoist-clone://auth/callback${ADDITIONAL_REDIRECT_URLS:+,${ADDITIONAL_REDIRECT_URLS}}
 
   # Dedicated Postgres for PowerSync's internal sync buckets. Kept apart from the

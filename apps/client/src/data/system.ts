@@ -11,7 +11,7 @@ import {
   type SyncStatusSource,
   type TaskRepositories,
 } from './repositories';
-import { parseAuthUrlError } from './repositories/auth-url';
+import { parseAuthUrlError, parseAuthUrlType } from './repositories/auth-url';
 import { registerAuthDeepLink } from './supabase/auth-deep-link';
 import { registerAuthLifecycle } from './supabase/auth-lifecycle';
 import { authPlatformOptions } from './supabase/auth-platform';
@@ -83,12 +83,14 @@ function createCloudServices(
       // Error params are left in place, but reading first keeps this reusable for both.
       const href = authPlatformOptions.getLocationHref?.();
       const urlAuthError = href ? parseAuthUrlError(href) : null;
+      const passwordRecoveryFromUrl = href ? parseAuthUrlType(href) === 'recovery' : false;
       const supabase = createSupabaseClient(cloudEnv.env);
       const { emailRedirectTo } = authPlatformOptions;
       const repository = createAuthRepository(supabase.auth, registerAuthLifecycle, {
         registerDeepLink: registerAuthDeepLink,
         ...(emailRedirectTo !== undefined ? { emailRedirectTo } : {}),
         ...(urlAuthError ? { urlAuthError } : {}),
+        ...(passwordRecoveryFromUrl ? { passwordRecoveryFromUrl } : {}),
       });
       const localData = createLocalDataReadiness();
       const stopSync = startSyncLifecycle(
