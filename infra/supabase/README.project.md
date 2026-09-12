@@ -10,6 +10,14 @@ Do not edit the upstream files in this directory. Project-specific additions liv
 repo-root `compose.supabase.yaml` (`include` of this stack) and `compose.local.yaml`
 (service overlays + PowerSync), and in `infra/powersync/`.
 
+## Auth redirect URLs
+
+Native email confirmation uses `todoist-clone://auth/callback`. `compose.local.yaml` always
+adds that URL to GoTrue's `GOTRUE_URI_ALLOW_LIST`. Extra allow-listed URLs can be set as
+comma-separated `ADDITIONAL_REDIRECT_URLS` in `infra/supabase/.env`; they are appended.
+Do not edit the vendored `.env.example` or compose files for this. Cloud projects add the
+same URL under **Authentication → URL Configuration → Redirect URLs** (see the root README).
+
 ## First-time setup
 
 ```sh

@@ -12,6 +12,7 @@ import {
   type TaskRepositories,
 } from './repositories';
 import { parseAuthUrlError } from './repositories/auth-url';
+import { registerAuthDeepLink } from './supabase/auth-deep-link';
 import { registerAuthLifecycle } from './supabase/auth-lifecycle';
 import { authPlatformOptions } from './supabase/auth-platform';
 import { createSupabaseClient } from './supabase/client';
@@ -83,7 +84,10 @@ function createCloudServices(
       const href = authPlatformOptions.getLocationHref?.();
       const urlAuthError = href ? parseAuthUrlError(href) : null;
       const supabase = createSupabaseClient(cloudEnv.env);
+      const { emailRedirectTo } = authPlatformOptions;
       const repository = createAuthRepository(supabase.auth, registerAuthLifecycle, {
+        registerDeepLink: registerAuthDeepLink,
+        ...(emailRedirectTo !== undefined ? { emailRedirectTo } : {}),
         ...(urlAuthError ? { urlAuthError } : {}),
       });
       const localData = createLocalDataReadiness();

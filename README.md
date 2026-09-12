@@ -80,9 +80,14 @@ Accounts are email + password with confirmation through the link in Supabase's d
 2. **Authentication → URL Configuration → Site URL**: the web app's origin, e.g.
    `http://localhost:8081` for `expo start --web`. The confirmation link redirects there with
    the session in the URL fragment, and the web client picks it up and signs the user in.
-   On native there is no deep link yet: the link opens in the browser and the user returns to
-   the app and signs in with their password (the email is confirmed server-side either way).
-3. Supabase's built-in email service only delivers to the project's team members and allows
+3. **Authentication → URL Configuration → Redirect URLs**: add
+   `todoist-clone://auth/callback`. Native `signUp` / `resend` pass that as `emailRedirectTo`
+   so the confirmation link opens the app (`scheme` in `apps/client/app.json`); the client
+   exchanges it for a session. The self-hosted stack allow-lists the same URL via
+   `compose.local.yaml` (`GOTRUE_URI_ALLOW_LIST`); extra URLs can be appended with
+   `ADDITIONAL_REDIRECT_URLS` in `infra/supabase/.env` (see
+   [infra/supabase/README.project.md](infra/supabase/README.project.md)).
+4. Supabase's built-in email service only delivers to the project's team members and allows
    about 2 emails per hour; use a team address for development. Anything more needs custom SMTP
    (https://supabase.com/docs/guides/auth/auth-smtp), which also unlocks template editing.
 

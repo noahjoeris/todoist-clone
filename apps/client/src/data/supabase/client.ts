@@ -1,6 +1,18 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { CloudEnv } from '../../config/env';
-import { authPlatformOptions } from './auth-platform';
+import { type AuthPlatformOptions, authPlatformOptions } from './auth-platform';
+
+/** Maps platform auth options to the `auth` object passed to `createClient`. */
+export function createSupabaseAuthConfig(platform: AuthPlatformOptions) {
+  const { storage, detectSessionInUrl, flowType } = platform;
+  return {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl,
+    ...(storage ? { storage } : {}),
+    ...(flowType ? { flowType } : {}),
+  };
+}
 
 /**
  * Supabase is used on the client for Auth (and later Storage) only.
@@ -8,18 +20,13 @@ import { authPlatformOptions } from './auth-platform';
  *
  * Sessions persist across restarts and tokens refresh automatically; `registerAuthLifecycle`
  * pauses refresh while a native app is backgrounded. Email confirmation happens through the
- * link in Supabase's default email; the web app picks the resulting session up from the URL.
+ * link in Supabase's default email. Web picks the session up from the Site URL fragment;
+ * native exchanges `todoist-clone://auth/callback` for a session.
  */
 export function createSupabaseClient(
   env: Pick<CloudEnv, 'supabaseUrl' | 'supabasePublishableKey'>,
 ): SupabaseClient {
-  const { storage, detectSessionInUrl } = authPlatformOptions;
   return createClient(env.supabaseUrl, env.supabasePublishableKey, {
-    auth: {
-      ...(storage ? { storage } : {}),
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl,
-    },
+    auth: createSupabaseAuthConfig(authPlatformOptions),
   });
 }

@@ -13,8 +13,15 @@ export interface AuthPlatformOptions {
   /** Whether to pick up a session from the page URL after an email confirmation redirect. */
   detectSessionInUrl: boolean;
   /**
+   * Native uses PKCE so confirmation redirects carry `?code=` (query survives Linking).
+   * Omitted on web so supabase-js stays on the implicit grant + `detectSessionInUrl`.
+   */
+  flowType?: 'pkce' | 'implicit';
+  /** Native confirmation emails redirect here. Omitted on web (Site URL + `detectSessionInUrl`). */
+  emailRedirectTo?: string;
+  /**
    * Current page URL so confirmation/recovery error params can be parsed before
-   * supabase-js consumes them. Web only; native deep links are a separate issue.
+   * supabase-js consumes them. Web only; native deep-link errors go through the callback exchange.
    */
   getLocationHref?: () => string;
 }

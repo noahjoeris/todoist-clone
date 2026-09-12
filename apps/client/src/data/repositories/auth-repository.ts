@@ -1,4 +1,6 @@
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
+import { createSessionFromAuthUrl, parseAuthCallbackUrl } from '../supabase/auth-callback';
+import type { RegisterAuthDeepLink } from '../supabase/auth-deep-link';
 import {
   AuthFailure,
   type AuthState,
@@ -41,15 +43,21 @@ export type AuthClient = Pick<
   | 'signOut'
   | 'startAutoRefresh'
   | 'stopAutoRefresh'
+  | 'exchangeCodeForSession'
+  | 'setSession'
 >;
 
 /** Platform hook for pausing token refresh in the background; returns a cleanup function. */
 export type RegisterLifecycle = (auth: AuthClient) => () => void;
 
 export interface AuthRepositoryOptions {
+  /** Native confirmation emails redirect here. Omitted on web so the Site URL is used. */
+  emailRedirectTo?: string;
+  /** Native `Linking` listener; web is a no-op. */
+  registerDeepLink?: RegisterAuthDeepLink;
   /**
    * Auth error captured from the page URL before supabase-js consumes it (web confirmation
-   * / recovery redirects). Native omits this; deep links are a separate issue.
+   * / recovery redirects). Native omits this; deep-link errors go through the callback exchange.
    */
   urlAuthError?: AuthUrlError | null;
 }
@@ -66,6 +74,9 @@ export function createAuthRepository(
   let restorationGeneration = 0;
   let restoring: { generation: number; promise: Promise<void> } | null = null;
   let guestOverride = false;
+  // True while a parsed confirmation callback is exchanging, so a getSession(null)
+  // that starts after the parse cannot apply signed-out and flash guest UI.
+  let authCallbackInFlight = false;
 
   function setState(next: AuthState) {
     state = next;
@@ -99,9 +110,88 @@ export function createAuthRepository(
   });
   const unregisterLifecycle = registerLifecycle(auth);
 
-  function clearGuestOverride() {
+  function restoreSession(): Promise<void> {
+    if (restoring?.generation === restorationGeneration) return restoring.promise;
+    const generation = ++restorationGeneration;
     guestOverride = false;
+    setState({ status: 'restoring' });
+    const promise = (async () => {
+      try {
+        const { data, error } = await auth.getSession();
+        if (error) throw error;
+        if (generation !== restorationGeneration || authCallbackInFlight) return;
+        if (data.session) {
+          applySession(data.session);
+          return;
+        }
+        const redirectError = options.urlAuthError
+          ? toAuthFailure(options.urlAuthError)
+          : undefined;
+        setState(
+          redirectError ? { status: 'signed-out', redirectError } : { status: 'signed-out' },
+        );
+      } catch (error) {
+        if (generation === restorationGeneration && !authCallbackInFlight) {
+          setState({ status: 'restore-failed', error: toAuthFailure(error) });
+        }
+      } finally {
+        if (restoring?.generation === generation) restoring = null;
+      }
+    })();
+    restoring = { generation, promise };
+    return promise;
   }
+
+  async function settleAfterFailedCallback(): Promise<void> {
+    if (state.status !== 'restoring' && state.status !== 'restore-failed') return;
+    if (restoring?.generation === restorationGeneration) {
+      await restoring.promise;
+    }
+    if (state.status !== 'restoring') return;
+    if (guestOverride) {
+      setState({ status: 'signed-out' });
+      return;
+    }
+    await restoreSession();
+  }
+
+  async function applySessionFromUrl(url: string): Promise<boolean> {
+    if (!parseAuthCallbackUrl(url)) return false;
+
+    // Invalidate an in-flight restore before the network call so a pending
+    // getSession(null) cannot apply signed-out while we exchange.
+    restorationGeneration += 1;
+    authCallbackInFlight = true;
+    if (state.status === 'restore-failed') {
+      setState({ status: 'restoring' });
+    }
+
+    try {
+      const session = await createSessionFromAuthUrl(auth, url);
+      if (session) {
+        restorationGeneration += 1;
+        applySession(session);
+        return true;
+      }
+      authCallbackInFlight = false;
+      await settleAfterFailedCallback();
+      return false;
+    } catch (error) {
+      authCallbackInFlight = false;
+      await settleAfterFailedCallback();
+      throw error;
+    } finally {
+      authCallbackInFlight = false;
+    }
+  }
+
+  const unregisterDeepLink =
+    options.registerDeepLink?.((url) =>
+      applySessionFromUrl(url).catch((error: unknown) => {
+        console.error('Failed to apply auth session from deep link', error);
+        return false;
+      }),
+    ) ?? (() => {});
 
   return {
     getState: () => state,
@@ -111,37 +201,7 @@ export function createAuthRepository(
       return () => listeners.delete(listener);
     },
 
-    restoreSession() {
-      if (restoring?.generation === restorationGeneration) return restoring.promise;
-      const generation = ++restorationGeneration;
-      clearGuestOverride();
-      setState({ status: 'restoring' });
-      const promise = (async () => {
-        try {
-          const { data, error } = await auth.getSession();
-          if (error) throw error;
-          if (generation !== restorationGeneration) return;
-          if (data.session) {
-            applySession(data.session);
-            return;
-          }
-          const redirectError = options.urlAuthError
-            ? toAuthFailure(options.urlAuthError)
-            : undefined;
-          setState(
-            redirectError ? { status: 'signed-out', redirectError } : { status: 'signed-out' },
-          );
-        } catch (error) {
-          if (generation === restorationGeneration) {
-            setState({ status: 'restore-failed', error: toAuthFailure(error) });
-          }
-        } finally {
-          if (restoring?.generation === generation) restoring = null;
-        }
-      })();
-      restoring = { generation, promise };
-      return promise;
-    },
+    restoreSession,
 
     continueAsGuest() {
       restorationGeneration += 1;
@@ -152,7 +212,11 @@ export function createAuthRepository(
     async signUp(input) {
       try {
         const { email, password } = credentialsSchema.parse(input);
-        const { data, error } = await auth.signUp({ email, password });
+        const { data, error } = await auth.signUp({
+          email,
+          password,
+          ...emailRedirectOptions(options.emailRedirectTo),
+        });
         if (error) throw error;
         // With confirmations on, Supabase answers an existing email with an obfuscated user
         // that has no identities instead of an error. Telling them to check their inbox would strand them.
@@ -179,7 +243,11 @@ export function createAuthRepository(
     },
 
     async resendConfirmation(email) {
-      const { error } = await auth.resend({ type: 'signup', email });
+      const { error } = await auth.resend({
+        type: 'signup',
+        email,
+        ...emailRedirectOptions(options.emailRedirectTo),
+      });
       if (error) throw toAuthFailure(error);
     },
 
@@ -196,9 +264,16 @@ export function createAuthRepository(
     dispose() {
       authListener.subscription.unsubscribe();
       unregisterLifecycle();
+      unregisterDeepLink();
       listeners.clear();
     },
   };
+}
+
+function emailRedirectOptions(
+  emailRedirectTo: string | undefined,
+): { options: { emailRedirectTo: string } } | Record<string, never> {
+  return emailRedirectTo !== undefined ? { options: { emailRedirectTo } } : {};
 }
 
 function toAuthUser(session: Session): AuthUser {

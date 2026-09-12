@@ -150,15 +150,22 @@ Supabase Cloud only allows editing the email template with custom SMTP.) Consequ
 - **Optional configuration.** `loadCloudEnv()` reads the four public variables (Supabase URL and
   publishable key, PowerSync URL, API URL). All unset means guest-only mode; a partial or
   malformed set is reported inside the app while guest tasks keep working.
-- **Platform options (extends ADR-007).** `auth-platform.native.ts` supplies AsyncStorage and
-  leaves URL session detection off (no deep link yet; after confirming in the browser the user
-  signs in with their password). `auth-platform.web.ts` keeps supabase-js on `localStorage`
-  and enables `detectSessionInUrl`, so the confirmation redirect to the Site URL signs the
-  user in. Failed redirects (`error` / `error_code` / `error_description` in the query or
-  fragment, typically `otp_expired`) are parsed from the URL before supabase-js runs and
-  surfaced as an `AuthFailure` on `signed-out` (`redirectError`) so Sign in can show them
-  and offer the existing resend-confirmation path. Native does not read the page URL
-  (deep links are a separate issue). `auth-lifecycle.native.ts` starts/stops token
+- **Platform options (extends ADR-007).** `auth-platform.native.ts` supplies AsyncStorage,
+  sets `flowType: 'pkce'`, and leaves URL session detection off (`detectSessionInUrl: false`):
+  there is no `window.location` on native, so confirmation is completed by
+  `auth-deep-link.native.ts` (`Linking` + `exchangeCodeForSession` / `setSession`) after
+  `signUp` / `resend` pass `emailRedirectTo: 'todoist-clone://auth/callback'`. PKCE puts the
+  grant in `?code=` (query survives Android intents and email clients); `setSession` remains
+  a fallback for implicit hash tokens from old links. The resulting session is applied in
+  `AuthRepository` and rides the existing auth-state / PowerSync lifecycle (ADR-015).
+  `auth-platform.web.ts` keeps supabase-js on `localStorage` and the implicit grant
+  (`detectSessionInUrl: true`; no `flowType`), so the confirmation redirect to the Site URL
+  signs the user in; web does not pass `emailRedirectTo`. Failed web redirects (`error` /
+  `error_code` / `error_description` in the query or fragment, typically `otp_expired`) are
+  parsed from the page URL before supabase-js runs and surfaced as an `AuthFailure` on
+  `signed-out` (`redirectError`) so Sign in can show them and offer the existing
+  resend-confirmation path. Native does not read the page URL; deep-link errors go through
+  the confirmation callback exchange. `auth-lifecycle.native.ts` starts/stops token
   auto-refresh from `AppState`; the web variant is a no-op because supabase-js already
   reacts to `visibilitychange`. The deprecated `lock` option is not used.
 - **Startup.** The root screen renders nothing until the stored session is resolved, so guest

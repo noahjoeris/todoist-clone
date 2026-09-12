@@ -1,6 +1,8 @@
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { AuthApiError, AuthRetryableFetchError } from '@supabase/supabase-js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { EMAIL_CONFIRMATION_REDIRECT_TO } from '../supabase/auth-callback';
+import type { RegisterAuthDeepLink } from '../supabase/auth-deep-link';
 import { AuthFailure } from './auth';
 import { type AuthClient, createAuthRepository } from './auth-repository';
 import { AuthUrlError } from './auth-url';
@@ -43,7 +45,13 @@ function deferred<T>(): Deferred<T> {
 describe('auth repository', () => {
   const unsubscribe = vi.fn();
   const unregisterLifecycle = vi.fn();
+  const unregisterDeepLink = vi.fn();
   const registerLifecycle = vi.fn(() => unregisterLifecycle);
+  let handleDeepLink!: (url: string) => Promise<boolean>;
+  const registerDeepLink = vi.fn<RegisterAuthDeepLink>((onUrl) => {
+    handleDeepLink = onUrl;
+    return unregisterDeepLink;
+  });
   let emitAuthEvent: (event: AuthChangeEvent, session: Session | null) => void;
 
   const auth = {
@@ -58,10 +66,16 @@ describe('auth repository', () => {
     signOut: vi.fn(),
     startAutoRefresh: vi.fn(),
     stopAutoRefresh: vi.fn(),
+    exchangeCodeForSession: vi.fn(),
+    setSession: vi.fn(),
   } as unknown as { [K in keyof AuthClient]: ReturnType<typeof vi.fn> } & AuthClient;
 
-  function createRepository() {
-    return createAuthRepository(auth, registerLifecycle);
+  function createRepository(options?: Parameters<typeof createAuthRepository>[2]) {
+    return createAuthRepository(auth, registerLifecycle, {
+      emailRedirectTo: EMAIL_CONFIRMATION_REDIRECT_TO,
+      registerDeepLink,
+      ...options,
+    });
   }
 
   async function createSignedInRepository() {
@@ -74,6 +88,10 @@ describe('auth repository', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     registerLifecycle.mockReturnValue(unregisterLifecycle);
+    registerDeepLink.mockImplementation((onUrl) => {
+      handleDeepLink = onUrl;
+      return unregisterDeepLink;
+    });
     auth.onAuthStateChange.mockImplementation((callback) => {
       emitAuthEvent = callback;
       return { data: { subscription: { id: 'sub', callback, unsubscribe } } };
@@ -306,7 +324,10 @@ describe('auth repository', () => {
       const repository = createRepository();
 
       await expect(repository.signUp(credentials)).resolves.toBe('confirmation-required');
-      expect(auth.signUp).toHaveBeenCalledWith(credentials);
+      expect(auth.signUp).toHaveBeenCalledWith({
+        ...credentials,
+        options: { emailRedirectTo: EMAIL_CONFIRMATION_REDIRECT_TO },
+      });
     });
 
     it('signs in directly when confirmations are disabled', async () => {
@@ -384,7 +405,11 @@ describe('auth repository', () => {
       auth.resend.mockResolvedValueOnce({ data: {}, error: null });
       const repository = createRepository();
       await repository.resendConfirmation('ada@example.com');
-      expect(auth.resend).toHaveBeenCalledWith({ type: 'signup', email: 'ada@example.com' });
+      expect(auth.resend).toHaveBeenCalledWith({
+        type: 'signup',
+        email: 'ada@example.com',
+        options: { emailRedirectTo: EMAIL_CONFIRMATION_REDIRECT_TO },
+      });
 
       auth.resend.mockResolvedValueOnce({
         data: {},
@@ -483,11 +508,150 @@ describe('auth repository', () => {
     it('registers the platform lifecycle and tears everything down on dispose', () => {
       const repository = createRepository();
       expect(registerLifecycle).toHaveBeenCalledWith(auth);
+      expect(registerDeepLink).toHaveBeenCalledTimes(1);
 
       repository.dispose();
 
       expect(unsubscribe).toHaveBeenCalledTimes(1);
       expect(unregisterLifecycle).toHaveBeenCalledTimes(1);
+      expect(unregisterDeepLink).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('confirmation deep link', () => {
+    it('signs in from a PKCE callback even after continue-as-guest', async () => {
+      auth.getSession.mockResolvedValue({
+        data: { session: null },
+        error: new AuthRetryableFetchError('fetch failed', 0),
+      });
+      auth.exchangeCodeForSession.mockResolvedValue({
+        data: { session: session() },
+        error: null,
+      });
+      const repository = createRepository();
+      await repository.restoreSession();
+      repository.continueAsGuest();
+
+      await handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=pkce-code`);
+
+      expect(auth.exchangeCodeForSession).toHaveBeenCalledWith('pkce-code');
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+      });
+    });
+
+    it('sets a session from implicit callback tokens', async () => {
+      auth.setSession.mockResolvedValue({ data: { session: session() }, error: null });
+      const repository = createRepository();
+
+      await handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}#access_token=at&refresh_token=rt`);
+
+      expect(auth.setSession).toHaveBeenCalledWith({
+        access_token: 'at',
+        refresh_token: 'rt',
+      });
+      expect(repository.getState().status).toBe('signed-in');
+    });
+
+    it('ignores unrelated URLs and leaves state unchanged on exchange failure', async () => {
+      auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+      auth.exchangeCodeForSession.mockResolvedValue({
+        data: { session: null },
+        error: new AuthApiError('expired', 403, 'otp_expired'),
+      });
+      const repository = createRepository();
+      await repository.restoreSession();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await handleDeepLink('todoist-clone://elsewhere');
+      expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
+      expect(repository.getState()).toEqual({ status: 'signed-out' });
+
+      await handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=stale`);
+      expect(repository.getState()).toEqual({ status: 'signed-out' });
+      expect(errorSpy).toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+
+    it('does not let a late restore overwrite a session from the confirmation link', async () => {
+      const pending = deferred<{ data: { session: Session | null }; error: null }>();
+      auth.getSession.mockReturnValue(pending.promise);
+      auth.exchangeCodeForSession.mockResolvedValue({
+        data: { session: session() },
+        error: null,
+      });
+      const repository = createRepository();
+      const restoration = repository.restoreSession();
+
+      await handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=pkce-code`);
+      expect(repository.getState().status).toBe('signed-in');
+
+      pending.resolve({ data: { session: null }, error: null });
+      await restoration;
+      expect(repository.getState().status).toBe('signed-in');
+    });
+
+    it('stays restoring until a cold-start confirmation exchange finishes', async () => {
+      const pendingRestore = deferred<{ data: { session: Session | null }; error: null }>();
+      const pendingExchange = deferred<{ data: { session: Session | null }; error: null }>();
+      auth.getSession.mockReturnValue(pendingRestore.promise);
+      auth.exchangeCodeForSession.mockReturnValue(pendingExchange.promise);
+      const repository = createRepository();
+      const restoration = repository.restoreSession();
+
+      const apply = handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=pkce-code`);
+      expect(repository.getState().status).toBe('restoring');
+
+      pendingRestore.resolve({ data: { session: null }, error: null });
+      await restoration;
+      expect(repository.getState().status).toBe('restoring');
+
+      pendingExchange.resolve({ data: { session: session() }, error: null });
+      await apply;
+      expect(repository.getState()).toEqual({
+        status: 'signed-in',
+        user: { id: 'user-1', email: 'ada@example.com' },
+      });
+    });
+
+    it('does not stay restoring when confirmation exchange fails during restore', async () => {
+      const pendingRestore = deferred<{ data: { session: Session | null }; error: null }>();
+      const pendingExchange = deferred<{
+        data: { session: Session | null };
+        error: AuthApiError;
+      }>();
+      auth.getSession.mockReturnValue(pendingRestore.promise);
+      auth.exchangeCodeForSession.mockReturnValue(pendingExchange.promise);
+      const repository = createRepository();
+      const restoration = repository.restoreSession();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const apply = handleDeepLink(`${EMAIL_CONFIRMATION_REDIRECT_TO}?code=stale`);
+      pendingRestore.resolve({ data: { session: null }, error: null });
+      await restoration;
+      expect(repository.getState().status).toBe('restoring');
+
+      pendingExchange.resolve({
+        data: { session: null },
+        error: new AuthApiError('expired', 403, 'otp_expired'),
+      });
+      await apply;
+
+      expect(repository.getState()).toEqual({ status: 'signed-out' });
+      expect(errorSpy).toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+
+    it('omits emailRedirectTo when the platform does not supply one', async () => {
+      auth.signUp.mockResolvedValue({
+        data: { user: { id: 'user-1', identities: [{ id: 'i' }] }, session: null },
+        error: null,
+      });
+      const repository = createAuthRepository(auth, registerLifecycle);
+
+      await repository.signUp(credentials);
+      expect(auth.signUp).toHaveBeenCalledWith(credentials);
     });
   });
 });
