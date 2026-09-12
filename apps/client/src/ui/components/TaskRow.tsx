@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Task } from '../../data/repositories';
 import { colors, priorityColors } from '../theme';
+import { LabelChipRow } from './LabelChip';
 import { TaskRescheduleMenu } from './TaskRescheduleMenu';
 import { dateLabel } from './task-date';
 
@@ -76,6 +77,7 @@ export function TaskRow({
                 P{task.priority}
               </Text>
             </View>
+            <LabelChipRow labels={task.labels} muted={completed} />
           </View>
         </Pressable>
         {onRescheduleOpen && (

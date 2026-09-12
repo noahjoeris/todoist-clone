@@ -285,7 +285,8 @@ the token never reaches the UI or `AuthRepository`. Consequences:
   is stripped of trailing slashes and joined with `URL` so `EXPO_PUBLIC_API_URL` values
   like `http://localhost:3000/` do not become `//sync/upload`. Do not
   `JSON.stringify` a `CrudEntry` (`toJSON()` emits `op_id/type/tx_id/data`). Local-only
-  tables never write `ps_crud`, so `table: 'tasks'` is the only upload.
+  tables never write `ps_crud`. Synced uploads are `tasks`, `labels`, and `task_labels`
+  through the same connector (no table filter).
 - **HTTP.** 2xx → `complete()`. 400/403 → `console.error` the body and `complete()`.
   401 → throw (retry). 5xx / network → throw (retry).
 - **Sign-out with a non-empty upload queue.** The primary action stays disabled until
@@ -409,7 +410,31 @@ acquire labels.
   (ADR-003). Both tables are in the `powersync` publication (ADR-005). The
   client SQLite schema mirrors the tables (`is_favorite` as integer). The API
   still owns authorization; UI → repositories → PowerSync remains the client
-  boundary. Client repositories and UI for labels are a follow-up.
+  boundary.
+- **Client repositories.** `LabelRepository` is account-scoped (`forUser`). The UI
+  never imports SQL/PowerSync. Duplicate names are rejected locally with a
+  Unicode-aware case-insensitive comparison (SQLite `lower()` is ASCII-only); the
+  server remains authoritative for offline cross-device races (400 →
+  `complete()`, ADR-014). Active counts use a LEFT JOIN plus a distinct-task
+  aggregate so unused labels stay visible at zero and duplicate link rows do not
+  overcount. Delete confirmation uses the distinct task count, including
+  completed tasks. Association rows are deleted in the same local transaction as
+  the label; SQLite does not rely on server FK cascades.
+- **Task associations.** Account task results include label summaries (`id`,
+  `name`, `color`) from owner-scoped joins. Guest results always have an empty
+  collection. Create/update attach and detach in the same `writeTransaction` as
+  the task write. A field-only edit omits association ops so a title change
+  cannot overwrite labels updated on another device. The editor captures the
+  label set at open and keeps that baseline while the form is mounted, so a
+  later live snapshot cannot make a title-only save look label-dirty. When the
+  editor did change labels, intended attach/detach is a three-way merge against
+  the open-editor baseline and the live links. Missing selected labels are skipped rather than
+  queued as invalid refs. Task delete removes local `task_labels` first. Undo
+  restores links only to labels that still exist and are owned by the same
+  user — it never recreates a deleted label.
+- **Inline create.** Creating a label from the task picker writes the `labels`
+  row immediately, even if the task draft is cancelled. The draft only attaches
+  on save. Save stays disabled until create finishes and the new id is selected.
 - **Wire.** Upload CRUD is discriminated by table and operation. SQLite
   favorite 0/1 is normalized to boolean at the contract boundary, not by
   truthy coercion. `user_id` and `updated_at` stay server-owned (ADR-014).

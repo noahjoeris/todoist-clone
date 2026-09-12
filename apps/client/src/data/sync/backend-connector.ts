@@ -23,7 +23,7 @@ type ConnectorSession = {
 };
 
 /**
- * Uploads local `tasks` writes to the Fastify API and vends the Supabase access token
+ * Uploads local `tasks`, `labels`, and `task_labels` writes to the Fastify API and vends the Supabase access token
  * as the PowerSync credential. Tokens stay in `src/data`; the UI never sees them.
  *
  * Each connector is bound to one account. A session for a different user is rejected

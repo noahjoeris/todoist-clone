@@ -38,6 +38,8 @@ function bindSqlite(
       const result = await callback({
         getOptional: async (sql: string, parameters: SQLInputValue[] = []) =>
           sqlite.prepare(sql).get(...parameters) ?? null,
+        getAll: async (sql: string, parameters: SQLInputValue[] = []) =>
+          sqlite.prepare(sql).all(...parameters),
         execute: async (sql: string, parameters: SQLInputValue[] = []) => {
           sqlite.prepare(sql).run(...parameters);
           return emptyResult();
@@ -50,6 +52,21 @@ function bindSqlite(
       throw error;
     }
   });
+}
+
+function createAccountTables(sqlite: DatabaseSync) {
+  sqlite.exec(`CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, description TEXT, priority INTEGER,
+      scheduled_date TEXT, scheduled_time TEXT, completed_at TEXT, created_at TEXT, updated_at TEXT
+    );
+    CREATE TABLE labels (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL,
+      is_favorite INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE task_labels (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, task_id TEXT NOT NULL, label_id TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );`);
 }
 
 function loadId(sqlite: DatabaseSync, table: 'local_tasks' | 'tasks'): string {
@@ -313,6 +330,7 @@ describe('task repository', () => {
       scheduledTime: '14:30',
       completedAt: '2026-09-11T15:00:00.000Z',
       createdAt: '2026-09-10T08:00:00.000Z',
+      labels: [],
     });
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM local_tasks').get()).toEqual({ count: 0 });
 
@@ -356,6 +374,7 @@ describe('task repository', () => {
       scheduledTime: null,
       completedAt: null,
       createdAt: '2026-09-01T00:00:00.000Z',
+      labels: [],
     };
     await expect(repository.restore(snapshot)).rejects.toBeInstanceOf(TaskRestoreConflictError);
     expect(sqlite.prepare('SELECT title FROM local_tasks').get()).toEqual({ title: 'Live' });
@@ -380,10 +399,7 @@ describe('account-owned task repository', () => {
     vi.resetAllMocks();
     directory = mkdtempSync(join(tmpdir(), 'todoist-user-tasks-'));
     sqlite = new DatabaseSync(join(directory, 'tasks.sqlite'));
-    sqlite.exec(`CREATE TABLE tasks (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, description TEXT, priority INTEGER,
-      scheduled_date TEXT, scheduled_time TEXT, completed_at TEXT, created_at TEXT, updated_at TEXT
-    )`);
+    createAccountTables(sqlite);
     bindSqlite(sqlite, execute, writeTransaction);
   });
 
@@ -473,6 +489,7 @@ describe('account-owned task repository', () => {
         scheduledTime: '14:30',
         completedAt: null,
         createdAt: '2026-09-09T10:00:00.000Z',
+        labels: [],
       },
     ]);
   });
@@ -521,6 +538,7 @@ describe('account-owned task repository', () => {
         scheduledTime: null,
         completedAt: '2026-09-11T15:00:00.000Z',
         createdAt: '2026-09-10T12:00:00.000000Z',
+        labels: [],
       },
     ]);
 
@@ -561,6 +579,7 @@ describe('account-owned task repository', () => {
         scheduledTime: null,
         completedAt: null,
         createdAt: '2026-09-01T00:00:00.000Z',
+        labels: [],
       }),
     ).rejects.toBeInstanceOf(TaskRestoreConflictError);
     expect(sqlite.prepare('SELECT title, user_id FROM tasks').get()).toEqual({
@@ -833,10 +852,7 @@ describe('account-owned task view isolation', () => {
     vi.resetAllMocks();
     directory = mkdtempSync(join(tmpdir(), 'todoist-user-views-'));
     sqlite = new DatabaseSync(join(directory, 'tasks.sqlite'));
-    sqlite.exec(`CREATE TABLE tasks (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, description TEXT, priority INTEGER,
-      scheduled_date TEXT, scheduled_time TEXT, completed_at TEXT, created_at TEXT, updated_at TEXT
-    )`);
+    createAccountTables(sqlite);
     bindSqlite(sqlite, execute, writeTransaction);
     bindWatch(sqlite, watch);
   });
@@ -875,5 +891,228 @@ describe('account-owned task view isolation', () => {
     const onB = vi.fn();
     repositories.forUser(USER_B).subscribeActiveCounts('2026-09-12', onB, vi.fn());
     expect(onB.mock.calls[0]?.[0]).toEqual({ inbox: 1, today: 1 });
+  });
+});
+
+describe('account-owned task labels', () => {
+  const USER_A = '11111111-1111-4111-8111-111111111111';
+  const USER_B = '22222222-2222-4222-8222-222222222222';
+  let sqlite: DatabaseSync;
+  let directory: string;
+  const execute =
+    vi.fn<(sql: string, parameters?: SQLInputValue[]) => Promise<QueryResult<never>>>();
+  const watch = vi.fn<CommonPowerSyncDatabase['watchWithCallback']>();
+  const writeTransaction = vi.fn();
+  const repositories = createTaskRepositories(
+    { execute, watchWithCallback: watch, writeTransaction },
+    randomUUID,
+  );
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    directory = mkdtempSync(join(tmpdir(), 'todoist-task-labels-'));
+    sqlite = new DatabaseSync(join(directory, 'tasks.sqlite'));
+    createAccountTables(sqlite);
+    bindSqlite(sqlite, execute, writeTransaction);
+    bindWatch(sqlite, watch);
+  });
+
+  afterEach(() => {
+    sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  function insertLabel(row: { id: string; name: string; userId?: string; color?: string }) {
+    sqlite
+      .prepare(
+        `INSERT INTO labels (id, user_id, name, color, is_favorite, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 0, '2026-09-10T08:00:00.000Z', '2026-09-10T08:00:00.000Z')`,
+      )
+      .run(row.id, row.userId ?? USER_A, row.name, row.color ?? 'charcoal');
+  }
+
+  function titles(query: Parameters<ReturnType<typeof repositories.forUser>['subscribeView']>[0]) {
+    const onTasks = vi.fn();
+    repositories.forUser(USER_A).subscribeView(query, onTasks, vi.fn());
+    const tasks = onTasks.mock.calls[0]?.[0] as { title: string }[] | undefined;
+    if (tasks == null) throw new Error('expected view results');
+    return tasks.map((task) => task.title);
+  }
+
+  it('attaches labels atomically on create and skips missing or duplicate ids', async () => {
+    insertLabel({ id: 'lab-work', name: 'Work' });
+    insertLabel({ id: 'lab-home', name: 'Home' });
+    await repositories
+      .forUser(USER_A)
+      .create({ title: 'Ship' }, ['lab-work', 'lab-work', MISSING_ID]);
+    const taskId = loadId(sqlite, 'tasks');
+    const links = sqlite
+      .prepare('SELECT label_id FROM task_labels ORDER BY label_id')
+      .all() as Array<{
+      label_id: string;
+    }>;
+    expect(links).toEqual([{ label_id: 'lab-work' }]);
+    expect(sqlite.prepare('SELECT title FROM tasks').get()).toEqual({ title: 'Ship' });
+
+    const onTasks = vi.fn();
+    repositories.forUser(USER_A).subscribe(onTasks, vi.fn());
+    expect(onTasks.mock.calls[0]?.[0][0]).toMatchObject({
+      title: 'Ship',
+      labels: [{ id: 'lab-work', name: 'Work', color: 'charcoal' }],
+    });
+
+    await repositories
+      .forUser(USER_A)
+      .update(
+        taskId,
+        { title: 'Ship', description: '', priority: 4, scheduledDate: null, scheduledTime: null },
+        { labelIds: ['lab-work', 'lab-home'], baselineLabelIds: ['lab-work'] },
+      );
+    expect(sqlite.prepare('SELECT label_id FROM task_labels ORDER BY label_id').all()).toEqual([
+      { label_id: 'lab-home' },
+      { label_id: 'lab-work' },
+    ]);
+  });
+
+  it('does not overwrite remote label changes on a field-only edit', async () => {
+    insertLabel({ id: 'lab-work', name: 'Work' });
+    insertLabel({ id: 'lab-home', name: 'Home' });
+    await repositories.forUser(USER_A).create({ title: 'Ship' }, ['lab-work']);
+    const taskId = loadId(sqlite, 'tasks');
+    sqlite
+      .prepare(
+        'INSERT INTO task_labels (id, user_id, task_id, label_id, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run('remote', USER_A, taskId, 'lab-home', '2026-09-10T09:00:00.000Z');
+
+    await repositories.forUser(USER_A).update(taskId, {
+      title: 'Renamed',
+      description: '',
+      priority: 4,
+      scheduledDate: null,
+      scheduledTime: null,
+    });
+    expect(
+      sqlite
+        .prepare('SELECT label_id FROM task_labels ORDER BY label_id')
+        .all()
+        .map((row) => (row as { label_id: string }).label_id),
+    ).toEqual(['lab-home', 'lab-work']);
+    expect(sqlite.prepare('SELECT title FROM tasks').get()).toEqual({ title: 'Renamed' });
+  });
+
+  it('keeps a remote add when the editor only removes a baseline label', async () => {
+    insertLabel({ id: 'lab-work', name: 'Work' });
+    insertLabel({ id: 'lab-home', name: 'Home' });
+    await repositories.forUser(USER_A).create({ title: 'Ship' }, ['lab-work']);
+    const taskId = loadId(sqlite, 'tasks');
+    sqlite
+      .prepare(
+        'INSERT INTO task_labels (id, user_id, task_id, label_id, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run('remote', USER_A, taskId, 'lab-home', '2026-09-10T09:00:00.000Z');
+
+    await repositories
+      .forUser(USER_A)
+      .update(
+        taskId,
+        { title: 'Ship', description: '', priority: 4, scheduledDate: null, scheduledTime: null },
+        { labelIds: [], baselineLabelIds: ['lab-work'] },
+      );
+    expect(sqlite.prepare('SELECT label_id FROM task_labels').all()).toEqual([
+      { label_id: 'lab-home' },
+    ]);
+  });
+
+  it('rolls back the task insert when attaching labels fails', async () => {
+    insertLabel({ id: 'lab-work', name: 'Work' });
+    writeTransaction.mockImplementationOnce(
+      async (callback: (tx: Transaction) => Promise<unknown>) => {
+        sqlite.exec('BEGIN');
+        try {
+          const result = await callback({
+            getOptional: async (sql: string, parameters: SQLInputValue[] = []) =>
+              sqlite.prepare(sql).get(...parameters) ?? null,
+            getAll: async (sql: string, parameters: SQLInputValue[] = []) =>
+              sqlite.prepare(sql).all(...parameters),
+            execute: async (sql: string, parameters: SQLInputValue[] = []) => {
+              if (sql.includes('task_labels')) throw new Error('Disk full');
+              sqlite.prepare(sql).run(...parameters);
+              return emptyResult();
+            },
+          } as unknown as Transaction);
+          sqlite.exec('COMMIT');
+          return result;
+        } catch (error) {
+          sqlite.exec('ROLLBACK');
+          throw error;
+        }
+      },
+    );
+    await expect(
+      repositories.forUser(USER_A).create({ title: 'Ship' }, ['lab-work']),
+    ).rejects.toThrow('Disk full');
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM task_labels').get()).toEqual({ count: 0 });
+  });
+
+  it('filters the label view with Inbox ordering and includes completed membership', async () => {
+    insertLabel({ id: 'lab-work', name: 'Work' });
+    insertLabel({ id: 'lab-home', name: 'Home' });
+    await repositories.forUser(USER_A).create({ title: 'P4 new', priority: 4 }, ['lab-work']);
+    await repositories.forUser(USER_A).create({ title: 'P1', priority: 1 }, ['lab-work']);
+    await repositories.forUser(USER_A).create({ title: 'Other' }, ['lab-home']);
+    await repositories.forUser(USER_A).create({ title: 'Done' }, ['lab-work']);
+    const doneId = sqlite.prepare("SELECT id FROM tasks WHERE title = 'Done'").get() as {
+      id: string;
+    };
+    await repositories.forUser(USER_A).setCompletion(doneId.id, true);
+
+    expect(titles({ destination: 'label', labelId: 'lab-work', completion: 'active' })).toEqual([
+      'P1',
+      'P4 new',
+    ]);
+    expect(titles({ destination: 'label', labelId: 'lab-work', completion: 'completed' })).toEqual([
+      'Done',
+    ]);
+    expect(titles({ destination: 'inbox', completion: 'active' })).toEqual(
+      expect.arrayContaining(['P1', 'P4 new', 'Other']),
+    );
+  });
+
+  it('removes local links with the task and restores only surviving owned labels', async () => {
+    insertLabel({ id: 'lab-work', name: 'Work' });
+    insertLabel({ id: 'lab-gone', name: 'Gone' });
+    insertLabel({ id: 'lab-b', name: 'B', userId: USER_B });
+    await repositories.forUser(USER_A).create({ title: 'Ship' }, ['lab-work', 'lab-gone']);
+    const taskId = loadId(sqlite, 'tasks');
+    sqlite
+      .prepare(
+        'INSERT INTO task_labels (id, user_id, task_id, label_id, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run('cross', USER_A, taskId, 'lab-b', '2026-09-10T09:00:00.000Z');
+
+    const snapshot = await repositories.forUser(USER_A).delete(taskId);
+    expect(snapshot.labels.map((label) => label.id).sort()).toEqual(['lab-gone', 'lab-work']);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM task_labels').get()).toEqual({ count: 0 });
+
+    sqlite.prepare('DELETE FROM labels WHERE id = ?').run('lab-gone');
+    await repositories.forUser(USER_A).restore(snapshot);
+    expect(
+      sqlite
+        .prepare('SELECT label_id FROM task_labels ORDER BY label_id')
+        .all()
+        .map((row) => (row as { label_id: string }).label_id),
+    ).toEqual(['lab-work']);
+    expect(
+      sqlite.prepare('SELECT COUNT(*) AS count FROM labels WHERE id = ?').get('lab-gone'),
+    ).toEqual({ count: 0 });
+  });
+
+  it("does not attach another user's label on create", async () => {
+    insertLabel({ id: 'lab-b', name: 'B', userId: USER_B });
+    await repositories.forUser(USER_A).create({ title: 'Ship' }, ['lab-b']);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM task_labels').get()).toEqual({ count: 0 });
   });
 });

@@ -1,12 +1,14 @@
-import type { TaskInput } from '../../data/repositories';
+import type { LabelRepository, TaskInput } from '../../data/repositories';
 import { emptyTaskDraft, TaskForm, type TaskFormDraft } from './TaskForm';
 
 interface TaskComposerProps {
-  onCreate: (input: TaskInput) => Promise<void>;
+  onCreate: (input: TaskInput, labelIds?: string[]) => Promise<void>;
   onClose: () => void;
   initialDate?: string | null;
   today?: string;
   registerDirtyCheck?: (isDirty: () => boolean) => () => void;
+  labels?: LabelRepository;
+  initialLabelIds?: string[];
 }
 
 export function TaskComposer({
@@ -15,6 +17,8 @@ export function TaskComposer({
   initialDate = null,
   today,
   registerDirtyCheck,
+  labels,
+  initialLabelIds,
 }: TaskComposerProps) {
   const initial: TaskFormDraft = { ...emptyTaskDraft, date: initialDate };
   return (
@@ -26,8 +30,11 @@ export function TaskComposer({
       submitAccessibilityLabel="Add task"
       cancelAccessibilityLabel="Cancel task"
       autoFocus
+      submitLabels="always"
       {...(today !== undefined ? { today } : {})}
       {...(registerDirtyCheck ? { registerDirtyCheck } : {})}
+      {...(labels ? { labels } : {})}
+      {...(initialLabelIds ? { initialLabelIds } : {})}
     />
   );
 }

@@ -34,7 +34,11 @@ accounts with email-link confirmation, password reset, email change, and persist
 available when cloud env is set. Guest tasks stay on the device and are hidden while signed
 in; after sign-in the app offers to add them to the account (or skip / don't ask again),
 preserving completion. Signed-in users sync account-owned tasks through PowerSync, including
-completion and restores. Guest-only use needs no `.env`: run `pnpm install`,
+completion and restores. Signed-in users can also create labels, attach them to tasks from a
+searchable picker (inline create uses charcoal and persists even if the task draft is cancelled),
+browse a label’s tasks, pin favorites in the sidebar, and manage rename/recolor/favorite/delete
+offline. Labels are account-only: guests see no label chips or navigation, and guest-task
+adoption does not copy labels. Guest-only use needs no `.env`: run `pnpm install`,
 `pnpm build`, then `pnpm --filter @todoist-clone/client web` (or a native development build).
 View membership, ordering, and create defaults: [docs/task-views.md](docs/task-views.md).
 
