@@ -331,3 +331,8 @@ passwords or URL fragments/tokens. Interactive smoke is not required to merge pr
 
 Implementation of the workflow is complete when this runbook and `.github/workflows/preview.yml`
 land; interactive acceptance is separate and still needs the staging decisions above.
+
+## License
+
+MIT. See [LICENSE](LICENSE). `infra/supabase` is an unmodified Apache-2.0 copy of the
+official Supabase Docker distribution.
